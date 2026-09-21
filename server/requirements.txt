@@ -1,0 +1,38 @@
+# ─── Web Framework ────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# ─── MongoDB (async driver + ODM) ─────────────────────────
+motor==3.7.0
+beanie==1.29.0
+
+# ─── Pydantic & Settings ──────────────────────────────────
+pydantic==2.12.5
+pydantic-settings==2.7.1
+email-validator==2.2.0
+
+# ─── Authentication ───────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# ─── HTTP Client (for Razorpay API calls) ─────────────────
+httpx==0.28.1
+
+# ─── Razorpay ─────────────────────────────────────────────
+razorpay==1.4.2
+
+# ─── Rate Limiting ────────────────────────────────────────
+slowapi==0.1.9
+
+# ─── Background Jobs ──────────────────────────────────────
+apscheduler==3.10.4
+
+# ─── Logging ──────────────────────────────────────────────
+loguru==0.7.3
+
+# ─── Form & File handling ─────────────────────────────────
+python-multipart==0.0.20
+
+# ─── Environment Variables ────────────────────────────────
+python-dotenv==1.0.1

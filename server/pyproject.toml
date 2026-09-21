@@ -1,0 +1,18 @@
+[project]
+name = "fitcore-server"
+version = "2.0.0"
+description = "FitCore gym management API"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["integration: tests that require a running MongoDB instance"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
