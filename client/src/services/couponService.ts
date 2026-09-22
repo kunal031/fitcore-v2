@@ -66,6 +66,12 @@ export async function validateCoupon(code: string, planId: string) {
 	return response.data.data;
 }
 
+/**
+ * Coupons the signed-in user may see.
+ *
+ * The backend narrows this by role: members get only offers they could redeem
+ * today, staff get the full catalogue including expired and archived codes.
+ */
 export async function getCoupons() {
 	const response = await api.get<{ data: Coupon[] }>("/coupons");
 	return response.data.data ?? [];
