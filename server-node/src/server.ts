@@ -18,9 +18,12 @@ async function main(): Promise<void> {
   startScheduler();
 
   const app = createApp();
-  const server = app.listen(settings.PORT, () => {
+  // Bind 0.0.0.0 explicitly: a platform health check reaches the container
+  // from outside, and binding only localhost would make the service
+  // unreachable and the deploy fail with no obvious error.
+  const server = app.listen(settings.PORT, "0.0.0.0", () => {
     logger.info(
-      `FitCore v2 server is ready on http://localhost:${settings.PORT} (${settings.ENVIRONMENT}).`,
+      `FitCore v2 server is ready on port ${settings.PORT} (${settings.ENVIRONMENT}).`,
     );
   });
 
