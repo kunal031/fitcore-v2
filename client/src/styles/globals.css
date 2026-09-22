@@ -528,3 +528,37 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 	.payment-row-head { flex-wrap: wrap; }
 	.txn-amount { justify-items: start; text-align: left; }
 }
+
+/* ── Analytics ────────────────────────────────────────────────────────────
+   Horizontal bars: the job is comparing magnitude across long plan names, so
+   the bars run horizontally and colour is one hue at varying opacity —
+   sequential, since plans are quantities to rank rather than identities to
+   tell apart. */
+.chart-panel { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.chart-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr auto; align-items: center; gap: 12px; }
+.chart-label { overflow: hidden; color: var(--muted); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.chart-archived { color: var(--danger); font-size: 11px; font-style: normal; }
+
+/* The track is the axis: a single recessive band rather than gridlines. */
+.chart-track { display: block; height: 22px; border-radius: 6px; background: var(--surface-raised); overflow: hidden; }
+/* Squared at the baseline, 4px rounded at the data end. */
+.chart-bar { display: block; height: 100%; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--accent); transition: width .45s ease; }
+
+.chart-value { display: grid; gap: 1px; justify-items: end; min-width: 62px; text-align: right; }
+.chart-value strong { font-size: 14px; }
+.chart-value small { color: var(--muted); font-size: 11px; }
+
+/* A table view, so the numbers are readable without relying on the bars. */
+.chart-table { margin-top: 2px; }
+.chart-table summary { padding: 8px 0; color: var(--accent); font-size: 13px; font-weight: 700; cursor: pointer; }
+.chart-table summary::marker { color: var(--muted); }
+.chart-table .detail-list { margin-top: 6px; }
+
+.analytics-note { margin: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
+
+@media (max-width: 560px) {
+	/* Long plan names need the full width on a phone, so the label sits above
+	   its bar rather than being truncated to a few characters. */
+	.chart-row { grid-template-columns: 1fr auto; row-gap: 5px; }
+	.chart-label { grid-column: 1 / -1; white-space: normal; }
+}

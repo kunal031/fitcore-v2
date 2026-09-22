@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BadgePercent, CalendarCheck, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
+import { BadgePercent, CalendarCheck, ChartColumnBig as ChartBar, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage } from "../../lib/axios";
 import {
@@ -35,6 +35,7 @@ import {
 	type MemberListItem,
 } from "../../services/userService";
 import { getSubscriptionById, type Subscription } from "../../services/subscriptionService";
+import { getAnalytics, type Analytics, type PlanBreakdownItem } from "../../services/analyticsService";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
 import type { AuthUser, MemberProfile } from "../../store/authStore";
@@ -43,7 +44,7 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-const STAFF_TABS = ["members", "record", "plans", "coupons", "catalogue", "profile"] as const;
+const STAFF_TABS = ["members", "record", "plans", "coupons", "analytics", "catalogue", "profile"] as const;
 type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
@@ -83,6 +84,7 @@ export default function StaffWorkspace({
 						["record", CalendarCheck, "Record"],
 						["plans", LayoutGrid, "Plans"],
 						["coupons", BadgePercent, "Coupons"],
+						["analytics", ChartBar, "Analytics"],
 				  ] as const)
 				: // Trainers: mark attendance, look up what is on sale, manage their
 				  // own profile. Plan and coupon editing stays with the Admin.
@@ -132,6 +134,7 @@ export default function StaffWorkspace({
 							: <MemberDirectory onOpenMember={setSelectedMemberId} />
 					)}
 					{tab === "record" && <AttendanceRecorder />}
+					{tab === "analytics" && isAdmin && <AnalyticsView />}
 					{tab === "catalogue" && <CatalogueView />}
 					{tab === "profile" && <StaffProfileView user={user} />}
 				</main>
@@ -1305,5 +1308,195 @@ function SectionJump({ sections, activeSection, onJump }: { sections: { id: stri
 				</button>
 			))}
 		</nav>
+	);
+}
+
+/* ── Admin: analytics ────────────────────────────────────────────────────── */
+
+/**
+ * Membership and plan analytics, split into two jump sections.
+ *
+ * The per-plan chart is a horizontal bar: the job is comparing magnitude
+ * across long plan names, so bars run horizontally and colour is sequential
+ * (one hue, more-is-darker) rather than categorical — the plans are not
+ * identities to tell apart, they are quantities to rank.
+ */
+function AnalyticsView() {
+	const [data, setData] = useState<Analytics | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	const sections = useMemo(
+		() => [
+			{ id: "member-analytics", label: "Members" },
+			{ id: "plan-analytics", label: "Plans" },
+		],
+		[],
+	);
+	const { activeSection, jumpTo } = useSectionJump(sections);
+
+	useEffect(() => {
+		let cancelled = false;
+		getAnalytics()
+			.then((result) => { if (!cancelled) { setData(result); setError(""); } })
+			.catch((requestError) => { if (!cancelled) setError(apiErrorMessage(requestError)); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, []);
+
+	if (loading) return <div className="loading-state">Loading analytics...</div>;
+	if (error || !data) return <div className="empty-state">{error || "Analytics are not available."}</div>;
+
+	const { members, plans } = data;
+
+	return (
+		<section className="view-stack">
+			<SectionJump sections={sections} activeSection={activeSection} onJump={jumpTo} />
+
+			{/* ── Membership ── */}
+			<div id="member-analytics" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Analytics</p><h2>Membership</h2></div>
+					<span className="muted">{members.total_registered} registered</span>
+				</div>
+
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<Users size={19} /><strong>{members.total_registered}</strong><span>total registered</span>
+					</article>
+					<article className="insight-card">
+						<CalendarCheck size={19} /><strong>{members.active}</strong><span>active members</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} /><strong>{members.inactive}</strong><span>inactive</span>
+					</article>
+				</div>
+
+				<div className="detail-list">
+					<Detail label="Lapsed — bought before, not renewed" value={String(members.lapsed)} />
+					<Detail label="Never bought a plan" value={String(members.never_subscribed)} />
+					<Detail label="Suspended accounts" value={String(members.suspended)} />
+					<Detail label="Joined this month" value={String(members.joined_this_month)} />
+				</div>
+
+				{members.lapsed > 0 && (
+					<p className="muted analytics-note">
+						{members.lapsed} {members.lapsed === 1 ? "member has" : "members have"} let a plan expire without
+						renewing — worth a follow-up.
+					</p>
+				)}
+			</div>
+
+			{/* ── Plans ── */}
+			<div id="plan-analytics" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Analytics</p><h2>Plans</h2></div>
+					<span className="muted">{plans.total_plans} in catalogue</span>
+				</div>
+
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<LayoutGrid size={19} /><strong>{plans.total_plans}</strong><span>total plans</span>
+					</article>
+					<article className="insight-card">
+						<CalendarCheck size={19} /><strong>{plans.active_plans}</strong><span>active</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} /><strong>{plans.inactive_plans}</strong><span>inactive</span>
+					</article>
+				</div>
+
+				<div className="detail-list">
+					<Detail
+						label="Most bought"
+						value={plans.most_bought ? `${plans.most_bought.plan_name} · ${plans.most_bought.total_sold} sold` : "No sales yet"}
+					/>
+					<Detail
+						label="Least bought"
+						value={plans.least_bought ? `${plans.least_bought.plan_name} · ${plans.least_bought.total_sold} sold` : "Not enough data"}
+					/>
+				</div>
+
+				<PlanMembersChart breakdown={plans.breakdown} />
+			</div>
+		</section>
+	);
+}
+
+/**
+ * Members per plan.
+ *
+ * Inline SVG so it needs no charting dependency and inherits the theme.
+ * Bars are capped at 22px with a 4px rounded data-end, squared at the
+ * baseline; the axis is a single hairline. Colour is one hue at varying
+ * opacity — magnitude, not identity.
+ */
+function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
+	// Plans nobody is on would render as a row of empty labels.
+	const rows = breakdown.filter((item) => item.active_members > 0 || item.total_sold > 0);
+	// Scale to a rounded ceiling rather than the largest value, so the leader
+	// does not always fill the track. Without this, several plans tied at the
+	// top all read as 100% and the chart says nothing about scale.
+	const peak = Math.max(1, ...rows.map((item) => item.active_members));
+	const max = peak <= 5 ? peak + 1 : Math.ceil(peak * 1.15);
+
+	if (rows.length === 0) {
+		return (
+			<>
+				<div className="section-heading"><h3>Members per plan</h3></div>
+				<div className="empty-state">No plans have been sold yet.</div>
+			</>
+		);
+	}
+
+	return (
+		<>
+			<div className="section-heading">
+				<h3>Members per plan</h3>
+				<span className="muted">current members</span>
+			</div>
+
+			<div className="chart-panel">
+				{rows.map((item) => {
+					const percent = (item.active_members / max) * 100;
+					return (
+						<div className="chart-row" key={item.plan_id}>
+							<span className="chart-label" title={item.plan_name}>
+								{item.plan_name}
+								{!item.is_active && <em className="chart-archived"> archived</em>}
+							</span>
+							<span className="chart-track">
+								<span
+									className="chart-bar"
+									style={{
+										width: `${Math.max(percent, item.active_members > 0 ? 3 : 0)}%`,
+										// One hue, deeper with magnitude: sequential, not categorical.
+										opacity: 0.5 + (item.active_members / peak) * 0.5,
+									}}
+								/>
+							</span>
+							<span className="chart-value">
+								<strong>{item.active_members}</strong>
+								<small>{item.total_sold} sold</small>
+							</span>
+						</div>
+					);
+				})}
+			</div>
+
+			{/* A table view, so the figures are readable without relying on the bars. */}
+			<details className="chart-table">
+				<summary>View as table</summary>
+				<div className="detail-list">
+					{rows.map((item) => (
+						<Detail
+							key={item.plan_id}
+							label={item.plan_name}
+							value={`${item.active_members} members · ${item.total_sold} sold · ${money(item.revenue_paise)}`}
+						/>
+					))}
+				</div>
+			</details>
+		</>
 	);
 }
