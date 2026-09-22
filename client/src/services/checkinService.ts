@@ -33,3 +33,15 @@ export async function getTodayCheckIns() {
 	const response = await api.get<{ data: TodayCheckIn[] }>("/checkin/today");
 	return response.data.data ?? [];
 }
+
+export interface TrainerDashboard {
+	checkins_today: number;
+	expiring_soon_count: number;
+	last_checkin: { member_name: string; time: string } | null;
+}
+
+/** Trainer/Admin floor summary: today's attendance and renewals due. */
+export async function getTrainerDashboard() {
+	const response = await api.get<{ data: TrainerDashboard }>("/dashboard/trainer");
+	return response.data.data;
+}
