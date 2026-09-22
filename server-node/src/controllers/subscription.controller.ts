@@ -41,6 +41,24 @@ export const subscriptionController = {
     res.json(success(await subscriptionService.getExpiring(days)));
   }),
 
+  /**
+   * GET /subscriptions/member/:memberId — staff.
+   *
+   * Answers "what is this member on right now?" without the caller having to
+   * know a subscription id. Returns 200 with null data when they hold none,
+   * matching how the member's own endpoint reports it.
+   */
+  getActiveForMember: asyncHandler(async (req: Request, res: Response) => {
+    const data = await subscriptionService.getActiveForMember(
+      req.params["memberId"] as string,
+    );
+    if (!data) {
+      res.json(emptyResult("No active subscription found."));
+      return;
+    }
+    res.json(success(data));
+  }),
+
   /** GET /subscriptions/:subId — staff. */
   getById: asyncHandler(async (req: Request, res: Response) => {
     res.json(
