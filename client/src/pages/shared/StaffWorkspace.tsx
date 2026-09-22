@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BadgePercent, CalendarCheck, ChevronRight, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, Users } from "lucide-react";
+import { BadgePercent, CalendarCheck, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage } from "../../lib/axios";
 import {
@@ -12,17 +12,33 @@ import {
 import {
 	createPlan,
 	getAllPlans,
+	getPlans,
 	setPlanActive,
 	updatePlan,
 	type Plan,
 	type PlanWritePayload,
 } from "../../services/planService";
-import { getTodayCheckIns, markAttendance, type TodayCheckIn } from "../../services/checkinService";
-import { listMembers, type MemberListItem } from "../../services/userService";
+import {
+	getTodayCheckIns,
+	getTrainerDashboard,
+	markAttendance,
+	type TodayCheckIn,
+	type TrainerDashboard,
+} from "../../services/checkinService";
+import {
+	getMyProfile,
+	listMembers,
+	updateMyProfile,
+	type MemberListItem,
+} from "../../services/userService";
 import { roleLabels } from "../../router/routes";
-import type { AuthUser } from "../../store/authStore";
+import type { AuthUser, MemberProfile } from "../../store/authStore";
 
-type StaffTab = "plans" | "coupons" | "members";
+/**
+ * Admin sees plan and coupon management plus the member list.
+ * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
+ */
+type StaffTab = "plans" | "coupons" | "members" | "catalogue" | "profile";
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
 const dateLabel = (value?: string | null) =>
@@ -41,7 +57,7 @@ export default function StaffWorkspace({
 	onLogout: () => void;
 }) {
 	const isAdmin = user.role === "owner";
-	// Trainers manage attendance only; plan/coupon control is Admin-only.
+	// Trainers land on attendance — the thing they do all day.
 	const [tab, setTab] = useState<StaffTab>(isAdmin ? "plans" : "members");
 
 	const tabs = useMemo(
@@ -52,7 +68,13 @@ export default function StaffWorkspace({
 						["coupons", BadgePercent, "Coupons"],
 						["members", Users, "Members"],
 				  ] as const)
-				: ([["members", Users, "Members"]] as const)),
+				: // Trainers: mark attendance, look up what is on sale, manage their
+				  // own profile. Plan and coupon editing stays with the Admin.
+				  ([
+						["members", CalendarCheck, "Attendance"],
+						["catalogue", LayoutGrid, "Plans & offers"],
+						["profile", UserRound, "Profile"],
+				  ] as const)),
 		[isAdmin],
 	);
 
@@ -72,26 +94,35 @@ export default function StaffWorkspace({
 				</div>
 			</header>
 
-			<main className="staff-main">
-				<div className="page-title">
-					<p className="eyebrow">{roleLabels[user.role]} workspace</p>
-					<h1>Good to see you, {user.full_name.split(" ")[0]}.</h1>
-				</div>
-
-				{tabs.length > 1 && (
-					<div className="staff-tabs" role="tablist">
-						{tabs.map(([key, Icon, label]) => (
-							<button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "staff-tab active" : "staff-tab"} onClick={() => setTab(key)}>
-								<Icon size={16} /> {label}
-							</button>
-						))}
+			<div className="app-body">
+				<main className="staff-main">
+					<div className="page-title">
+						<p className="eyebrow">{roleLabels[user.role]} workspace</p>
+						<h1>Good to see you, {user.full_name.split(" ")[0]}.</h1>
 					</div>
-				)}
 
-				{tab === "plans" && isAdmin && <PlanManager />}
-				{tab === "coupons" && isAdmin && <CouponManager />}
-				{tab === "members" && <MemberManager />}
-			</main>
+					{tab === "plans" && isAdmin && <PlanManager />}
+					{tab === "coupons" && isAdmin && <CouponManager />}
+					{tab === "members" && <MemberManager isAdmin={isAdmin} />}
+					{tab === "catalogue" && <CatalogueView />}
+					{tab === "profile" && <StaffProfileView user={user} />}
+				</main>
+
+				{/* One nav, two shapes: a sidebar from 900px up, a bottom bar below. */}
+				<nav className="app-nav" aria-label="Workspace navigation">
+					{tabs.map(([key, Icon, label]) => (
+						<button
+							key={key}
+							aria-current={tab === key ? "page" : undefined}
+							className={tab === key ? "nav-item active" : "nav-item"}
+							onClick={() => setTab(key)}
+						>
+							<Icon size={19} />
+							<span>{label}</span>
+						</button>
+					))}
+				</nav>
+			</div>
 		</div>
 	);
 }
@@ -365,9 +396,10 @@ function CouponManager() {
 
 /* ── Trainer/Admin: members and attendance ──────────────────────────────── */
 
-function MemberManager() {
+function MemberManager({ isAdmin }: { isAdmin: boolean }) {
 	const [members, setMembers] = useState<MemberListItem[]>([]);
 	const [today, setToday] = useState<TodayCheckIn[]>([]);
+	const [summary, setSummary] = useState<TrainerDashboard | null>(null);
 	const [search, setSearch] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
@@ -376,13 +408,16 @@ function MemberManager() {
 
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
-		const [memberResult, todayResult] = await Promise.allSettled([
+		// allSettled so a failing summary never blanks the member list.
+		const [memberResult, todayResult, summaryResult] = await Promise.allSettled([
 			listMembers({ search: term, role: "member", limit: 50 }),
 			getTodayCheckIns(),
+			getTrainerDashboard(),
 		]);
 		if (memberResult.status === "fulfilled") { setMembers(memberResult.value.items); setError(""); }
 		else setError(apiErrorMessage(memberResult.reason));
 		if (todayResult.status === "fulfilled") setToday(todayResult.value);
+		if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
 		setLoading(false);
 	}, []);
 
@@ -401,7 +436,13 @@ function MemberManager() {
 		try {
 			const result = await markAttendance(member.id);
 			setNotice(result.message ?? `Attendance marked for ${member.full_name}.`);
-			setToday(await getTodayCheckIns());
+			// Refresh both, so the list and the counter stay in step.
+			const [refreshedToday, refreshedSummary] = await Promise.allSettled([
+				getTodayCheckIns(),
+				getTrainerDashboard(),
+			]);
+			if (refreshedToday.status === "fulfilled") setToday(refreshedToday.value);
+			if (refreshedSummary.status === "fulfilled") setSummary(refreshedSummary.value);
 		} catch (requestError) {
 			// Covers no active plan, expired plan and exhausted quota.
 			setError(apiErrorMessage(requestError));
@@ -414,6 +455,29 @@ function MemberManager() {
 				<div><p className="eyebrow">Attendance</p><h2>Members</h2></div>
 				<span className="muted">{today.length} checked in today</span>
 			</div>
+
+			{/* Floor summary. Admins get the fuller picture on their own dashboard. */}
+			{!isAdmin && summary && (
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<CalendarCheck size={19} />
+						<strong>{summary.checkins_today}</strong>
+						<span>checked in today</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} />
+						<strong>{summary.expiring_soon_count}</strong>
+						<span>renewals due this week</span>
+					</article>
+				</div>
+			)}
+
+			{!isAdmin && summary?.last_checkin && (
+				<p className="muted last-checkin-note">
+					Last in: <strong>{summary.last_checkin.member_name}</strong> at{" "}
+					{new Date(summary.last_checkin.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+				</p>
+			)}
 
 			<div className="search-row">
 				<Search size={16} />
@@ -461,5 +525,271 @@ function MemberManager() {
 				</>
 			)}
 		</section>
+	);
+}
+
+/* ── Trainer: read-only plan and offer catalogue ─────────────────────────── */
+
+/**
+ * What a trainer needs at the desk when a member asks "what do you have, and
+ * is there a discount on it?" — active plans and live coupons, nothing
+ * editable. Plan and coupon management stays with the Admin.
+ */
+function CatalogueView() {
+	const [plans, setPlans] = useState<Plan[]>([]);
+	const [coupons, setCoupons] = useState<Coupon[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			const [planResult, couponResult] = await Promise.allSettled([getPlans(), getCoupons()]);
+			if (cancelled) return;
+			if (planResult.status === "fulfilled") { setPlans(planResult.value); setError(""); }
+			else setError(apiErrorMessage(planResult.reason));
+			// Coupons are readable by staff, but a failure here should not hide
+			// the plans, so it is swallowed rather than surfaced.
+			if (couponResult.status === "fulfilled") setCoupons(couponResult.value);
+			setLoading(false);
+		})();
+		return () => { cancelled = true; };
+	}, []);
+
+	// Only offers a member could actually use today.
+	const liveCoupons = useMemo(
+		() => coupons.filter((c) => c.is_active && new Date(c.valid_until) >= new Date()),
+		[coupons],
+	);
+
+	const discountLabel = (coupon: Coupon) =>
+		coupon.discount_type === "percentage"
+			? `${coupon.discount_value}% off`
+			: `${money(coupon.discount_value)} off`;
+
+	if (loading) return <div className="loading-state">Loading plans and offers...</div>;
+
+	return (
+		<section className="view-stack">
+			<div className="section-heading">
+				<div><p className="eyebrow">Catalogue</p><h2>Active plans</h2></div>
+				<span className="muted">{plans.length} on sale</span>
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{plans.length === 0 ? (
+				<div className="empty-state">No active plans right now.</div>
+			) : (
+				<div className="history-list">
+					{plans.map((plan) => (
+						<article className="history-row catalogue-row" key={plan.id}>
+							<div>
+								<strong>{plan.plan_name}</strong>
+								<span>
+									{money(plan.price_paise)} · {plan.calendar_days} days · {plan.allocated_days} visits
+								</span>
+								{plan.features.length > 0 && (
+									<small className="muted">{plan.features.join(" · ")}</small>
+								)}
+							</div>
+							<span className="role-chip">{plan.category}</span>
+						</article>
+					))}
+				</div>
+			)}
+
+			<div className="section-heading">
+				<div><p className="eyebrow">Offers</p><h2>Running coupons</h2></div>
+				<span className="muted">{liveCoupons.length} live</span>
+			</div>
+
+			{liveCoupons.length === 0 ? (
+				<div className="empty-state">No offers are running at the moment.</div>
+			) : (
+				<div className="history-list">
+					{liveCoupons.map((coupon) => (
+						<article className="history-row catalogue-row" key={coupon.id}>
+							<div>
+								<strong>{coupon.code}</strong>
+								<span>{discountLabel(coupon)} · {coupon.name}</span>
+								<small className="muted">
+									Valid till {dateLabel(coupon.valid_until)}
+									{coupon.min_plan_price_paise > 0 && ` · min ${money(coupon.min_plan_price_paise)}`}
+									{` · ${Math.max(0, coupon.max_uses - coupon.current_uses)} left`}
+								</small>
+							</div>
+							<span className="status-dot">Live</span>
+						</article>
+					))}
+				</div>
+			)}
+
+			<p className="muted catalogue-note">
+				View only. Ask an Admin to add or change a plan or offer.
+			</p>
+		</section>
+	);
+}
+
+/* ── Staff: own profile ──────────────────────────────────────────────────── */
+
+const emptyStaffProfileForm = {
+	full_name: "",
+	dob: "",
+	gender: "",
+	blood_group: "",
+	street: "",
+	city: "",
+	state: "",
+	pincode: "",
+};
+
+/**
+ * A trainer's own profile, matching the fields members can edit.
+ *
+ * Phone and email are shown but locked: the backend refuses to change a phone
+ * at all, and rejects changing an email once it is set (EMAIL_IMMUTABLE).
+ */
+function StaffProfileView({ user }: { user: AuthUser }) {
+	const [profile, setProfile] = useState<MemberProfile | null>(null);
+	const [form, setForm] = useState(emptyStaffProfileForm);
+	const [editing, setEditing] = useState(false);
+	const [loading, setLoading] = useState(true);
+	const [saving, setSaving] = useState(false);
+	const [message, setMessage] = useState("");
+	const [error, setError] = useState("");
+
+	const hydrate = useCallback((next: MemberProfile) => {
+		setProfile(next);
+		setForm({
+			full_name: next.full_name ?? "",
+			dob: next.profile?.dob ?? "",
+			gender: next.profile?.gender ?? "",
+			blood_group: next.profile?.blood_group ?? "",
+			street: next.profile?.address?.street ?? "",
+			city: next.profile?.address?.city ?? "",
+			state: next.profile?.address?.state ?? "",
+			pincode: next.profile?.address?.pincode ?? "",
+		});
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		getMyProfile()
+			.then((next) => { if (!cancelled) hydrate(next); })
+			.catch((requestError) => { if (!cancelled) setError(apiErrorMessage(requestError)); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, [hydrate]);
+
+	const change = (key: keyof typeof emptyStaffProfileForm) =>
+		(event: React.ChangeEvent<HTMLInputElement>) =>
+			setForm((prev) => ({ ...prev, [key]: event.target.value }));
+
+	async function save() {
+		setSaving(true); setMessage(""); setError("");
+		try {
+			// Send only what the backend accepts; blanks are omitted so an empty
+			// field never overwrites a stored value with "".
+			const updated = await updateMyProfile({
+				full_name: form.full_name.trim() || undefined,
+				dob: form.dob || undefined,
+				gender: form.gender.trim() || undefined,
+				blood_group: form.blood_group.trim() || undefined,
+				address: {
+					street: form.street.trim() || undefined,
+					city: form.city.trim() || undefined,
+					state: form.state.trim() || undefined,
+					pincode: form.pincode.trim() || undefined,
+				},
+			});
+			hydrate(updated);
+			setMessage("Profile updated successfully.");
+			setEditing(false);
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	if (loading) return <div className="loading-state">Loading your profile...</div>;
+
+	const displayName = profile?.full_name ?? user.full_name;
+
+	return (
+		<section className="view-stack">
+			<div className="section-heading">
+				<div><p className="eyebrow">Profile</p><h2>Your details</h2></div>
+			</div>
+
+			<div className="profile-card">
+				<div className="profile-avatar">{displayName.charAt(0)}</div>
+				<div>
+					<h3>{displayName}</h3>
+					<p>{profile?.email ?? "No email added"}</p>
+					<span className="role-chip">{roleLabels[user.role]}</span>
+				</div>
+				<button className="outline-button compact-button" onClick={() => { setEditing(!editing); setMessage(""); setError(""); }}>
+					{editing ? "Close" : "Edit profile"}
+				</button>
+			</div>
+
+			{message && <div className="profile-message">{message}</div>}
+			{error && <div className="error-message">{error}</div>}
+
+			{editing ? (
+				<div className="profile-form">
+					<div className="field">
+						<label>Full name</label>
+						<input value={form.full_name} onChange={change("full_name")} />
+					</div>
+					<div className="field">
+						<label>Phone <span className="optional-label">cannot be changed</span></label>
+						<input value={profile?.phone ?? user.phone} disabled />
+					</div>
+					<div className="field">
+						<label>Email <span className="optional-label">cannot be changed</span></label>
+						<input type="email" value={profile?.email ?? ""} disabled />
+					</div>
+					<div className="profile-form-grid">
+						<div className="field"><label>Date of birth</label><input type="date" value={form.dob} onChange={change("dob")} /></div>
+						<div className="field"><label>Gender</label><input value={form.gender} onChange={change("gender")} placeholder="Not specified" /></div>
+						<div className="field"><label>Blood group</label><input value={form.blood_group} onChange={change("blood_group")} placeholder="e.g. B+" /></div>
+						<div className="field"><label>Street</label><input value={form.street} onChange={change("street")} /></div>
+						<div className="field"><label>City</label><input value={form.city} onChange={change("city")} /></div>
+						<div className="field"><label>State</label><input value={form.state} onChange={change("state")} /></div>
+						<div className="field"><label>Pincode</label><input value={form.pincode} onChange={change("pincode")} /></div>
+					</div>
+					<button className="primary-action" onClick={save} disabled={saving}>
+						{saving ? "Saving..." : "Save changes"}
+					</button>
+				</div>
+			) : (
+				<div className="detail-list">
+					<Detail label="Phone" value={profile?.phone ?? user.phone} />
+					<Detail label="Email" value={profile?.email ?? "Not added"} />
+					<Detail label="Date of birth" value={dateLabel(profile?.profile?.dob)} />
+					<Detail label="Gender" value={profile?.profile?.gender ?? "Not added"} />
+					<Detail label="Blood group" value={profile?.profile?.blood_group ?? "Not added"} />
+					<Detail
+						label="Address"
+						value={[profile?.profile?.address?.street, profile?.profile?.address?.city, profile?.profile?.address?.state, profile?.profile?.address?.pincode].filter(Boolean).join(", ") || "Not added"}
+					/>
+					<Detail label="Role" value={roleLabels[user.role]} />
+					<Detail label="With the gym since" value={dateLabel(profile?.gym_meta?.joined_on)} />
+				</div>
+			)}
+		</section>
+	);
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+	return (
+		<div className="detail-row">
+			<span>{label}</span>
+			<strong>{value}</strong>
+		</div>
 	);
 }
