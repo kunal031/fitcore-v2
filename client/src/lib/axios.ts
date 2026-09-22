@@ -28,16 +28,20 @@ api.interceptors.request.use((config) => {
 /**
  * Clear the session and return to login.
  *
- * A hard navigation rather than a router push: it throws away every
- * component's in-memory state, so no stale screen can linger showing data the
+ * Uses a full navigation rather than a router push so every component's
+ * in-memory state is discarded — no stale screen can linger showing data the
  * signed-out user should no longer see.
+ *
+ * That means the host must serve index.html for /login rather than looking
+ * for a file there; see vercel.json. Without that rewrite this lands on the
+ * host's 404 page.
  */
 export function endSession() {
 	localStorage.removeItem("fitcore_access_token");
 	localStorage.removeItem("fitcore_refresh_token");
 	localStorage.removeItem("fitcore-session");
 	if (window.location.pathname !== "/login") {
-		window.location.assign("/login");
+		window.location.replace("/login");
 	}
 }
 
