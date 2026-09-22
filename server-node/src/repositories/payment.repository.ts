@@ -60,6 +60,15 @@ export const paymentRepository = {
     return rows[0]?.total ?? 0;
   },
 
+  /** Lifetime successful revenue grouped by plan, for the analytics breakdown. */
+  async sumRevenueByPlan(): Promise<Map<string, number>> {
+    const rows = await Payment.aggregate<{ _id: Types.ObjectId; total: number }>([
+      { $match: { status: PAYMENT_STATUS.SUCCESS } },
+      { $group: { _id: "$plan_id", total: { $sum: "$final_amount_paise" } } },
+    ]).exec();
+    return new Map(rows.map((row) => [String(row._id), row.total]));
+  },
+
   listRecentSuccessful(limit = 5): Promise<PaymentDoc[]> {
     return Payment.find({ status: PAYMENT_STATUS.SUCCESS })
       .sort({ created_at: -1 })
