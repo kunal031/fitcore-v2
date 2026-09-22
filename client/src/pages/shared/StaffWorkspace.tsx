@@ -1060,13 +1060,22 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 							</thead>
 							<tbody>
 								{visibleTrainers.map((trainer) => (
-									<tr key={trainer.id}>
+									<tr
+										key={trainer.id}
+										className="row-clickable"
+										onClick={() => onOpenMember(trainer.id)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" || event.key === " ") {
+												event.preventDefault();
+												onOpenMember(trainer.id);
+											}
+										}}
+										tabIndex={0}
+										role="button"
+										aria-label={`Open ${trainer.full_name}`}
+									>
 										<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
-										<td data-label="Name">
-											<button className="link-button" onClick={() => onOpenMember(trainer.id)}>
-												{trainer.full_name}
-											</button>
-										</td>
+										<td data-label="Name"><strong>{trainer.full_name}</strong></td>
 										<td data-label="Phone">{trainer.phone}</td>
 										<td data-label="Email">{trainer.email ?? "—"}</td>
 										<td data-label="Status">
@@ -1092,18 +1101,27 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 							{members.map((member) => {
 								const done = checkedInIds.has(member.id);
 								return (
-									<tr key={member.id}>
+									// The row opens the profile; the attendance cell stops the
+									// click so marking present never navigates away.
+									<tr
+										key={member.id}
+										className="row-clickable"
+										onClick={() => onOpenMember(member.id)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" || event.key === " ") {
+												event.preventDefault();
+												onOpenMember(member.id);
+											}
+										}}
+										tabIndex={0}
+										role="button"
+										aria-label={`Open ${member.full_name}`}
+									>
 										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
-										<td data-label="Name">
-											{/* Opens the profile; the row itself stays a table row so the
-											    columns line up. */}
-											<button className="link-button" onClick={() => onOpenMember(member.id)}>
-												{member.full_name}
-											</button>
-										</td>
+										<td data-label="Name"><strong>{member.full_name}</strong></td>
 										<td data-label="Phone">{member.phone}</td>
 										<td data-label="Email">{member.email ?? "—"}</td>
-										<td data-label="Attendance">
+										<td data-label="Attendance" onClick={(event) => event.stopPropagation()}>
 											{done ? (
 												<span className="status-dot">Present today</span>
 											) : (
@@ -1239,26 +1257,12 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 				<Detail label="Record ID" value={shortId(memberId)} />
 			</div>
 
-			{!isStaff && <>
-			<div className="section-heading">
-				<h2>Attendance</h2>
-				<span className="muted">{attendance.length} visits</span>
-			</div>
-			{attendance.length === 0 ? (
-				<div className="empty-state">No visits recorded yet.</div>
-			) : (
-				<div className="history-list">
-					{attendance.slice(0, 20).map((entry) => (
-						<article className="history-row" key={`${entry.date}-${entry.check_in_time}`}>
-							<div>
-								<strong>{dateLabel(entry.date)}</strong>
-								<span>{new Date(entry.check_in_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-							</div>
-						</article>
-					))}
+			{!isStaff && (
+				<div className="member-split">
+					<MemberAttendanceCalendar attendance={attendance} />
+					<MemberPlanPanel subscription={subscription} attendanceCount={attendance.length} />
 				</div>
 			)}
-			</>}
 		</section>
 	);
 }
@@ -1730,5 +1734,167 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 				</div>
 			</details>
 		</>
+	);
+}
+
+/* ── Admin: member attendance calendar ───────────────────────────────────── */
+
+const MONTH_WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/** Local YYYY-MM-DD, so "today" matches the viewer's calendar rather than UTC. */
+function localDayKey(date: Date) {
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * A member's visits as a month grid.
+ *
+ * Replaces the day-by-day list, which grew unreadable past a few weeks and
+ * made patterns — a gap, a streak — impossible to see. Opens on the current
+ * month; the arrows step back through history.
+ */
+function MemberAttendanceCalendar({ attendance }: { attendance: AttendanceRecord[] }) {
+	const today = new Date();
+	const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+
+	const attendedDays = useMemo(
+		() => new Set(attendance.map((entry) => entry.date)),
+		[attendance],
+	);
+
+	const year = cursor.getFullYear();
+	const month = cursor.getMonth();
+
+	const cells = useMemo(() => {
+		const firstWeekday = new Date(year, month, 1).getDay();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		// Leading blanks so the 1st lands under its weekday column.
+		return [
+			...Array.from({ length: firstWeekday }, () => null),
+			...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
+		];
+	}, [year, month]);
+
+	const monthLabel = cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+	const visitsThisMonth = cells.filter((date) => date && attendedDays.has(localDayKey(date))).length;
+	const atCurrentMonth = year === today.getFullYear() && month === today.getMonth();
+
+	return (
+		<article className="panel calendar-panel">
+			<div className="panel-head">
+				<p className="eyebrow">Attendance</p>
+				<div className="calendar-nav">
+					<button
+						className="icon-button compact-icon"
+						onClick={() => setCursor(new Date(year, month - 1, 1))}
+						aria-label="Previous month"
+					>
+						<ChevronLeft size={16} />
+					</button>
+					<button
+						className="icon-button compact-icon"
+						onClick={() => setCursor(new Date(year, month + 1, 1))}
+						disabled={atCurrentMonth}
+						aria-label="Next month"
+					>
+						<ChevronRight size={16} />
+					</button>
+				</div>
+			</div>
+
+			<h3 className="calendar-month">{monthLabel}</h3>
+
+			<div className="calendar-grid" role="grid" aria-label={`Attendance for ${monthLabel}`}>
+				{MONTH_WEEKDAYS.map((initial, index) => (
+					<span className="calendar-weekday" key={`${initial}-${index}`} aria-hidden="true">{initial}</span>
+				))}
+				{cells.map((date, index) => {
+					if (!date) return <span className="calendar-cell empty" key={`blank-${index}`} />;
+					const key = localDayKey(date);
+					const attended = attendedDays.has(key);
+					const isToday = key === localDayKey(today);
+					const isFuture = date > today;
+					return (
+						<span
+							key={key}
+							className={`calendar-cell${attended ? " attended" : ""}${isToday ? " is-today" : ""}${isFuture ? " future" : ""}`}
+							title={attended ? `Visited on ${date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : undefined}
+						>
+							{date.getDate()}
+						</span>
+					);
+				})}
+			</div>
+
+			<p className="muted calendar-summary">
+				<span className="calendar-key" aria-hidden="true" /> {visitsThisMonth} {visitsThisMonth === 1 ? "visit" : "visits"} this month
+			</p>
+		</article>
+	);
+}
+
+/* ── Admin: member's current plan ────────────────────────────────────────── */
+
+/**
+ * The member's active plan, alongside the calendar.
+ *
+ * Shows what they bought and how much of it is left — the two questions an
+ * admin looking at a member is usually answering.
+ */
+function MemberPlanPanel({ subscription, attendanceCount }: { subscription: Subscription | null; attendanceCount: number }) {
+	if (!subscription) {
+		return (
+			<article className="panel plan-panel">
+				<div className="panel-head"><p className="eyebrow">Current plan</p></div>
+				<div className="panel-empty">
+					<p>No active plan.</p>
+					<small className="muted">{attendanceCount} lifetime {attendanceCount === 1 ? "visit" : "visits"} recorded.</small>
+				</div>
+			</article>
+		);
+	}
+
+	const usedPercent = Math.min(
+		100,
+		Math.round((subscription.days_used / subscription.allocated_days) * 100),
+	);
+
+	return (
+		<article className="panel plan-panel">
+			<div className="panel-head">
+				<p className="eyebrow">Current plan</p>
+				<span className="status-dot">{subscription.status}</span>
+			</div>
+
+			<div className="plan-panel-ring">
+				<div
+					className="progress-ring"
+					style={{ "--progress": `${usedPercent * 3.6}deg` } as React.CSSProperties}
+				>
+					<span>{subscription.days_remaining}<small>left</small></span>
+				</div>
+				<div className="plan-panel-head">
+					<h2 className="plan-panel-name">{subscription.plan_snapshot.plan_name}</h2>
+					<p className="muted">{subscription.plan_snapshot.calendar_days} days · {subscription.allocated_days} visits</p>
+					<strong className="plan-panel-price">{money(subscription.plan_snapshot.price_paise)}</strong>
+				</div>
+			</div>
+
+			<div className="plan-progress">
+				<div className="plan-progress-track">
+					<div className="plan-progress-fill" style={{ width: `${usedPercent}%` }} />
+				</div>
+				<div className="plan-progress-labels">
+					<span>{subscription.days_used} of {subscription.allocated_days} visits used</span>
+					<span>{usedPercent}%</span>
+				</div>
+			</div>
+
+			<dl className="plan-facts">
+				<div><dt>Started</dt><dd>{dateLabel(subscription.starts_on)}</dd></div>
+				<div><dt>Expires</dt><dd>{dateLabel(subscription.expires_on)}</dd></div>
+				<div><dt>Days to renew</dt><dd>{subscription.days_until_expiry}</dd></div>
+			</dl>
+		</article>
 	);
 }
