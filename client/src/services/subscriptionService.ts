@@ -47,3 +47,15 @@ export async function getSubscriptionById(subId: string) {
 	const response = await api.get<ApiResponse<Subscription>>(`/subscriptions/${subId}`);
 	return response.data.data;
 }
+
+/**
+ * A member's current subscription, for staff.
+ *
+ * Asks the backend to look it up by member rather than following the user's
+ * `active_subscription_id`, which is a cached pointer that can drift out of
+ * step with the subscription's real status.
+ */
+export async function getActiveSubscriptionForMember(memberId: string) {
+	const response = await api.get<ApiResponse<Subscription | null>>(`/subscriptions/member/${memberId}`);
+	return response.data.data;
+}

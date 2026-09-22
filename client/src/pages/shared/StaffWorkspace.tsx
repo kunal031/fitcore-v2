@@ -36,7 +36,7 @@ import {
 	type MemberListItem,
 	type TrainerListItem,
 } from "../../services/userService";
-import { getSubscriptionById, type Subscription } from "../../services/subscriptionService";
+import { getActiveSubscriptionForMember, type Subscription } from "../../services/subscriptionService";
 import { getAnalytics, type Analytics, type PlanBreakdownItem } from "../../services/analyticsService";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
@@ -1169,9 +1169,10 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 			// allSettled: a member with no plan should still show their profile.
 			const [log, sub] = await Promise.allSettled([
 				getMemberAttendance(memberId),
-				profile.active_subscription_id
-					? getSubscriptionById(profile.active_subscription_id)
-					: Promise.resolve(null),
+				// Looked up by member rather than by the profile's cached
+				// active_subscription_id, which can drift out of step with the
+				// subscription's real status.
+				getActiveSubscriptionForMember(memberId),
 			]);
 			if (log.status === "fulfilled") setAttendance(log.value);
 			if (sub.status === "fulfilled") setSubscription(sub.value);
