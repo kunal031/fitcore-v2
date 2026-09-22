@@ -46,3 +46,9 @@ export async function listMembers(params: { page?: number; limit?: number; searc
 	});
 	return response.data.data ?? { items: [], meta: { page: 1, limit: 50, total: 0, pages: 0 } };
 }
+
+/** Full profile for one member. Staff only. */
+export async function getUserById(userId: string) {
+	const response = await api.get<{ data: MemberProfile }>(`/users/${userId}`);
+	return response.data.data;
+}

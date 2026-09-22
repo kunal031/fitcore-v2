@@ -41,3 +41,9 @@ export async function getSubscriptionHistory() {
 	const response = await api.get<ApiResponse<Subscription[]>>("/subscriptions/me/history");
 	return response.data.data ?? [];
 }
+
+/** One subscription by id. Staff only — used on the member profile. */
+export async function getSubscriptionById(subId: string) {
+	const response = await api.get<ApiResponse<Subscription>>(`/subscriptions/${subId}`);
+	return response.data.data;
+}
