@@ -31,8 +31,10 @@ import {
 	getMyProfile,
 	getUserById,
 	listMembers,
+	listTrainers,
 	updateMyProfile,
 	type MemberListItem,
+	type TrainerListItem,
 } from "../../services/userService";
 import { getSubscriptionById, type Subscription } from "../../services/subscriptionService";
 import { getAnalytics, type Analytics, type PlanBreakdownItem } from "../../services/analyticsService";
@@ -927,18 +929,30 @@ function Detail({ label, value }: { label: string; value: string }) {
  * returning to the list keeps the search term.
  */
 function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void }) {
+	const [audience, setAudience] = useState<"members" | "trainers">("members");
 	const [members, setMembers] = useState<MemberListItem[]>([]);
+	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
+	const [today, setToday] = useState<TodayCheckIn[]>([]);
 	const [total, setTotal] = useState(0);
 	const [search, setSearch] = useState("");
 	const [loading, setLoading] = useState(true);
+	const [markingId, setMarkingId] = useState<string | null>(null);
 	const [error, setError] = useState("");
+	const [notice, setNotice] = useState("");
 
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
 		try {
-			const result = await listMembers({ search: term, role: "member", limit: 100 });
+			// Today's check-ins drive the per-row attendance state.
+			const [result, trainerList, todayList] = await Promise.all([
+				listMembers({ search: term, role: "member", limit: 100 }),
+				listTrainers(),
+				getTodayCheckIns(),
+			]);
 			setMembers(result.items);
 			setTotal(result.meta.total);
+			setTrainers(trainerList);
+			setToday(todayList);
 			setError("");
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
@@ -956,49 +970,150 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 	}, [search, load]);
 
 	const activeCount = members.filter((m) => m.gym_meta.membership_status === "active").length;
+	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+	const showingTrainers = audience === "trainers";
+
+	// Trainers are filtered here rather than server-side; the list is small and
+	// the endpoint takes no search parameter.
+	const visibleTrainers = useMemo(() => {
+		const term = search.trim().toLowerCase();
+		if (!term) return trainers;
+		return trainers.filter(
+			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
+		);
+	}, [trainers, search]);
+
+	async function mark(member: MemberListItem) {
+		setMarkingId(member.id); setError(""); setNotice("");
+		try {
+			const result = await markAttendance(member.id);
+			setNotice(result.message ?? `Attendance marked for ${member.full_name}.`);
+			setToday(await getTodayCheckIns());
+		} catch (requestError) {
+			// Covers no active plan, expired plan and exhausted quota.
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setMarkingId(null);
+		}
+	}
 
 	return (
 		<section className="view-stack">
 			<div className="section-heading">
-				<div><p className="eyebrow">Members</p><h2>Gym members</h2></div>
+				<div><p className="eyebrow">Directory</p><h2>{showingTrainers ? "Trainers" : "Gym users"}</h2></div>
 			</div>
+
+			<nav className="section-jump" aria-label="Choose directory">
+				<button
+					className={showingTrainers ? "jump-pill" : "jump-pill active"}
+					aria-current={showingTrainers ? undefined : "true"}
+					onClick={() => setAudience("members")}
+				>
+					Gym users
+				</button>
+				<button
+					className={showingTrainers ? "jump-pill active" : "jump-pill"}
+					aria-current={showingTrainers ? "true" : undefined}
+					onClick={() => setAudience("trainers")}
+				>
+					Trainers
+				</button>
+			</nav>
 
 			<div className="insight-grid">
 				<article className="insight-card accent-card">
-					<Users size={19} /><strong>{total}</strong><span>total members</span>
+					<Users size={19} />
+					<strong>{showingTrainers ? trainers.length : total}</strong>
+					<span>{showingTrainers ? "trainers" : "gym users"}</span>
 				</article>
-				<article className="insight-card">
-					<CalendarCheck size={19} /><strong>{activeCount}</strong><span>active now</span>
-				</article>
+				{!showingTrainers && (
+					<article className="insight-card">
+						<CalendarCheck size={19} /><strong>{activeCount}</strong><span>active now</span>
+					</article>
+				)}
 			</div>
 
 			<div className="search-row">
 				<Search size={16} />
-				<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone" aria-label="Search members" />
+				<input
+					value={search}
+					onChange={(e) => setSearch(e.target.value)}
+					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+					aria-label="Search directory"
+				/>
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
+			{notice && <div className="profile-message">{notice}</div>}
 
 			{loading ? (
-				<div className="loading-state">Loading members...</div>
+				<div className="loading-state">Loading directory...</div>
+			) : showingTrainers ? (
+				visibleTrainers.length === 0 ? (
+					<div className="empty-state">No trainers matched your search.</div>
+				) : (
+					<div className="table-wrap">
+						<table className="data-table">
+							<thead>
+								<tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
+							</thead>
+							<tbody>
+								{visibleTrainers.map((trainer) => (
+									<tr key={trainer.id}>
+										<td data-label="Name"><strong>{trainer.full_name}</strong></td>
+										<td data-label="Phone">{trainer.phone}</td>
+										<td data-label="Email">{trainer.email ?? "—"}</td>
+										<td data-label="Status">
+											<span className={trainer.is_active ? "status-dot" : "muted"}>
+												{trainer.is_active ? "Active" : "Inactive"}
+											</span>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)
 			) : members.length === 0 ? (
-				<div className="empty-state">No members matched your search.</div>
+				<div className="empty-state">No gym users matched your search.</div>
 			) : (
-				<div className="history-list">
-					{members.map((member) => (
-						<button className="history-row pass-row" key={member.id} onClick={() => onOpenMember(member.id)}>
-							<div>
-								<strong>{member.full_name}</strong>
-								<span>{member.phone} · joined {dateLabel(member.gym_meta.joined_on)}</span>
-							</div>
-							<div className="pass-row-right">
-								<span className={member.gym_meta.membership_status === "active" ? "status-dot" : "muted"}>
-									{member.gym_meta.membership_status}
-								</span>
-							</div>
-							<ChevronRight size={17} />
-						</button>
-					))}
+				<div className="table-wrap">
+					<table className="data-table">
+						<thead>
+							<tr><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
+						</thead>
+						<tbody>
+							{members.map((member) => {
+								const done = checkedInIds.has(member.id);
+								return (
+									<tr key={member.id}>
+										<td data-label="Name">
+											{/* Opens the profile; the row itself stays a table row so the
+											    columns line up. */}
+											<button className="link-button" onClick={() => onOpenMember(member.id)}>
+												{member.full_name}
+											</button>
+										</td>
+										<td data-label="Phone">{member.phone}</td>
+										<td data-label="Email">{member.email ?? "—"}</td>
+										<td data-label="Attendance">
+											{done ? (
+												<span className="status-dot">Present today</span>
+											) : (
+												<button
+													className="outline-button compact-button"
+													onClick={() => mark(member)}
+													disabled={markingId === member.id}
+												>
+													{markingId === member.id ? "Marking..." : "Mark attendance"}
+												</button>
+											)}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
 				</div>
 			)}
 		</section>
