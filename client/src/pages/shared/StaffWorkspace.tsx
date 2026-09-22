@@ -120,8 +120,8 @@ export default function StaffWorkspace({
 			<div className="app-body">
 				<main className="staff-main">
 					<div className="page-title">
-						<p className="eyebrow">{roleLabels[user.role]} workspace</p>
-						<h1>Good to see you, {user.full_name.split(" ")[0]}.</h1>
+						<p className="eyebrow"></p>
+						
 					</div>
 
 					{tab === "plans" && isAdmin && <PlanManager />}
@@ -275,7 +275,6 @@ function PlanManager() {
 			<div id="active-plans" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Plan management</p><h2>Active plans</h2></div>
-					<span className="muted">{activePlans.length} on sale</span>
 				</div>
 				{loading ? <div className="loading-state">Loading plans...</div>
 					: activePlans.length === 0 ? <div className="empty-state">No active plans. Add one below.</div>
@@ -285,7 +284,6 @@ function PlanManager() {
 			<div id="inactive-plans" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Archived</p><h2>Inactive plans</h2></div>
-					<span className="muted">{inactivePlans.length} archived</span>
 				</div>
 				{inactivePlans.length === 0
 					? <div className="empty-state">No archived plans.</div>
@@ -697,7 +695,6 @@ function CatalogueView() {
 		<section className="view-stack">
 			<div className="section-heading">
 				<div><p className="eyebrow">Catalogue</p><h2>Active plans</h2></div>
-				<span className="muted">{plans.length} on sale</span>
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
