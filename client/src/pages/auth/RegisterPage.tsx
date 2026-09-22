@@ -37,9 +37,6 @@ export default function RegisterPage() {
 				<img className="auth-art-image" src={gymHero} alt="" aria-hidden="true" />
 				<div className="auth-art-content">
 					<div className="brand"><span className="brand-mark"><Dumbbell size={18} /></span><span className="brand-text">FITCORE</span></div>
-					<div className="auth-art-copy">
-						<h1>Start your next chapter.</h1>
-					</div>
 				</div>
 			</section>
 			<section className="auth-panel"><div className="auth-card"><p className="eyebrow">Join FitCore</p><h2>Create your account.</h2><p className="muted">Your member account starts with a few simple details.</p>
