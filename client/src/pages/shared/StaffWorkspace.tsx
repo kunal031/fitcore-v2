@@ -37,7 +37,14 @@ import {
 	type TrainerListItem,
 } from "../../services/userService";
 import { getActiveSubscriptionForMember, type Subscription } from "../../services/subscriptionService";
-import { getAnalytics, type Analytics, type PlanBreakdownItem } from "../../services/analyticsService";
+import {
+	getAnalytics,
+	getMemberCohort,
+	type Analytics,
+	type CohortMember,
+	type MemberCohort,
+	type PlanBreakdownItem,
+} from "../../services/analyticsService";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
 import type { AuthUser, MemberProfile } from "../../store/authStore";
@@ -1553,6 +1560,8 @@ function AnalyticsView() {
 	const [data, setData] = useState<Analytics | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+	// Which figure's members are open below the list, if any.
+	const [cohort, setCohort] = useState<MemberCohort | null>(null);
 
 	const sections = useMemo(
 		() => [
@@ -1591,20 +1600,24 @@ function AnalyticsView() {
 					<article className="insight-card accent-card">
 						<Users size={19} /><strong>{members.total_registered}</strong><span>total registered</span>
 					</article>
-					<article className="insight-card">
+					<button className="insight-card insight-card-button" onClick={() => setCohort("active")}>
 						<CalendarCheck size={19} /><strong>{members.active}</strong><span>active members</span>
-					</article>
-					<article className="insight-card">
+					</button>
+					<button className="insight-card insight-card-button" onClick={() => setCohort("inactive")}>
 						<Clock size={19} /><strong>{members.inactive}</strong><span>inactive</span>
-					</article>
+					</button>
 				</div>
 
+				{/* Each row opens the members it counts, so a figure can be acted
+				    on rather than only read. */}
 				<div className="detail-list">
-					<Detail label="Lapsed — bought before, not renewed" value={String(members.lapsed)} />
-					<Detail label="Never bought a plan" value={String(members.never_subscribed)} />
-					<Detail label="Suspended accounts" value={String(members.suspended)} />
-					<Detail label="Joined this month" value={String(members.joined_this_month)} />
+					<CohortRow label="Lapsed — bought before, not renewed" count={members.lapsed} cohort="lapsed" onOpen={setCohort} active={cohort === "lapsed"} />
+					<CohortRow label="Never bought a plan" count={members.never_subscribed} cohort="never_subscribed" onOpen={setCohort} active={cohort === "never_subscribed"} />
+					<CohortRow label="Suspended accounts" count={members.suspended} cohort="suspended" onOpen={setCohort} active={cohort === "suspended"} />
+					<CohortRow label="Joined this month" count={members.joined_this_month} cohort="joined_this_month" onOpen={setCohort} active={cohort === "joined_this_month"} />
 				</div>
+
+				{cohort && <CohortTable cohort={cohort} onClose={() => setCohort(null)} />}
 
 				{members.lapsed > 0 && (
 					<p className="muted analytics-note">
@@ -1923,3 +1936,92 @@ function MemberPlanPanel({ subscription, attendanceCount }: { subscription: Subs
 		</article>
 	);
 }
+
+/* ── Admin: analytics drill-down ─────────────────────────────────────────── */
+
+/** One analytics figure, clickable to reveal the members it counts. */
+function CohortRow({ label, count, cohort, onOpen, active }: { label: string; count: number; cohort: MemberCohort; onOpen: (c: MemberCohort | null) => void; active: boolean }) {
+	// A zero row has nothing to show, so it stays a plain row.
+	if (count === 0) {
+		return (
+			<div className="detail-row">
+				<span>{label}</span>
+				<strong>0</strong>
+			</div>
+		);
+	}
+
+	return (
+		<button
+			className={active ? "detail-row cohort-row open" : "detail-row cohort-row"}
+			onClick={() => onOpen(active ? null : cohort)}
+			aria-expanded={active}
+		>
+			<span>{label}</span>
+			<span className="cohort-row-right">
+				<strong>{count}</strong>
+				<ChevronRight size={15} className={active ? "cohort-chevron open" : "cohort-chevron"} />
+			</span>
+		</button>
+	);
+}
+
+/** The members behind a figure, loaded when the row is opened. */
+function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () => void }) {
+	const [members, setMembers] = useState<CohortMember[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		getMemberCohort(cohort)
+			.then((result) => { if (!cancelled) { setMembers(result); setError(""); } })
+			.catch((requestError) => { if (!cancelled) setError(apiErrorMessage(requestError)); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, [cohort]);
+
+	return (
+		<div className="cohort-panel">
+			<div className="cohort-panel-head">
+				<strong>{COHORT_LABELS[cohort]}</strong>
+				<button className="text-button" onClick={onClose}>Close</button>
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{loading ? (
+				<div className="loading-state">Loading members...</div>
+			) : members.length === 0 ? (
+				<div className="empty-state">No members in this group.</div>
+			) : (
+				<div className="table-wrap">
+					<table className="data-table">
+						<thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Joined</th></tr></thead>
+						<tbody>
+							{members.map((member) => (
+								<tr key={member.id}>
+									<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+									<td data-label="Name"><strong>{member.full_name}</strong></td>
+									<td data-label="Phone">{member.phone}</td>
+									<td data-label="Email">{member.email ?? "—"}</td>
+									<td data-label="Joined">{dateLabel(member.gym_meta.joined_on)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
+		</div>
+	);
+}
+
+const COHORT_LABELS: Record<MemberCohort, string> = {
+	active: "Active members",
+	inactive: "Inactive members",
+	lapsed: "Lapsed — bought before, not renewed",
+	never_subscribed: "Never bought a plan",
+	suspended: "Suspended accounts",
+	joined_this_month: "Joined this month",
+};
