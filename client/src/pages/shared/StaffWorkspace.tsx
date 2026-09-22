@@ -1000,10 +1000,6 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Directory</p><h2>{showingTrainers ? "Trainers" : "Gym users"}</h2></div>
-			</div>
-
 			<nav className="section-jump" aria-label="Choose directory">
 				<button
 					className={showingTrainers ? "jump-pill" : "jump-pill active"}
@@ -1360,11 +1356,6 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Attendance</p><h2>{showingTrainers ? "Trainers on today" : "Mark attendance"}</h2></div>
-				<span className="muted">{today.length} checked in today</span>
-			</div>
-
 			{isAdmin && (
 				<nav className="section-jump" aria-label="Choose who to record">
 					<button
@@ -1594,7 +1585,6 @@ function AnalyticsView() {
 			<div id="member-analytics" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Analytics</p><h2>Membership</h2></div>
-					<span className="muted">{members.total_registered} registered</span>
 				</div>
 
 				<div className="insight-grid">
@@ -1628,7 +1618,6 @@ function AnalyticsView() {
 			<div id="plan-analytics" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Analytics</p><h2>Plans</h2></div>
-					<span className="muted">{plans.total_plans} in catalogue</span>
 				</div>
 
 				<div className="insight-grid">
@@ -1671,11 +1660,16 @@ function AnalyticsView() {
 function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 	// Plans nobody is on would render as a row of empty labels.
 	const rows = breakdown.filter((item) => item.active_members > 0 || item.total_sold > 0);
-	// Scale to a rounded ceiling rather than the largest value, so the leader
-	// does not always fill the track. Without this, several plans tied at the
-	// top all read as 100% and the chart says nothing about scale.
 	const peak = Math.max(1, ...rows.map((item) => item.active_members));
-	const max = peak <= 5 ? peak + 1 : Math.ceil(peak * 1.15);
+
+	// A rounded axis maximum with whole-number ticks, so the bars are read
+	// against a scale rather than against each other. Without it, several
+	// plans tied at the top all fill the track and the chart says nothing.
+	const axisMax = peak <= 4 ? peak + 1 : Math.ceil((peak * 1.1) / 2) * 2;
+	const tickCount = Math.min(axisMax, 5);
+	const ticks = Array.from({ length: tickCount + 1 }, (_, i) =>
+		Math.round((axisMax / tickCount) * i),
+	).filter((value, index, all) => all.indexOf(value) === index);
 
 	if (rows.length === 0) {
 		return (
@@ -1688,40 +1682,71 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 
 	return (
 		<>
-			<div className="section-heading">
-				<h3>Members per plan</h3>
-				<span className="muted">current members</span>
-			</div>
+			<div className="section-heading"><h3>Members per plan</h3></div>
 
 			<div className="chart-panel">
-				{rows.map((item) => {
-					const percent = (item.active_members / max) * 100;
-					return (
-						<div className="chart-row" key={item.plan_id}>
-							<span className="chart-label" title={item.plan_name}>
-								{item.plan_name}
-								{!item.is_active && <em className="chart-archived"> archived</em>}
+				<div className="chart-plot">
+					{/* Hairline grid, one step off the surface — recessive, so the
+					    bars stay the loudest thing in the panel. */}
+					<div className="chart-grid" aria-hidden="true">
+						<span />
+						<span className="chart-grid-track">
+							<span className="chart-grid-inner">
+								{ticks.map((tick) => (
+									<span
+										className="chart-gridline"
+										key={tick}
+										style={{ left: `${(tick / axisMax) * 100}%` }}
+									/>
+								))}
 							</span>
-							<span className="chart-track">
+						</span>
+					</div>
+
+					<div className="chart-rows">
+						{rows.map((item) => (
+							<div className="chart-row" key={item.plan_id}>
+								<span className="chart-label" title={item.plan_name}>
+									{item.plan_name}
+									{!item.is_active && <em className="chart-archived"> archived</em>}
+								</span>
+								<span className="chart-track">
+									{/* Thin mark rather than a thick saturated block, with the
+									    value sitting just past the end instead of inside it. */}
+									<span
+										className="chart-bar"
+										style={{ width: `${(item.active_members / axisMax) * 100}%` }}
+									/>
+									<span className="chart-mark-value">{item.active_members}</span>
+								</span>
+							</div>
+						))}
+					</div>
+				</div>
+
+				{/* Axis band, inside the panel so it is never cropped out. */}
+				<div className="chart-axis" aria-hidden="true">
+					<span className="chart-label" />
+					<span className="chart-axis-track">
+						{/* Inner element matches the bar track's measured width, so a
+						    tick sits exactly under the value it marks. */}
+						<span className="chart-axis-inner">
+							{ticks.map((tick) => (
 								<span
-									className="chart-bar"
-									style={{
-										width: `${Math.max(percent, item.active_members > 0 ? 3 : 0)}%`,
-										// One hue, deeper with magnitude: sequential, not categorical.
-										opacity: 0.5 + (item.active_members / peak) * 0.5,
-									}}
-								/>
-							</span>
-							<span className="chart-value">
-								<strong>{item.active_members}</strong>
-								<small>{item.total_sold} sold</small>
-							</span>
-						</div>
-					);
-				})}
+									className="chart-tick"
+									key={tick}
+									style={{ left: `${(tick / axisMax) * 100}%` }}
+								>
+									{tick}
+								</span>
+							))}
+						</span>
+					</span>
+				</div>
+				<p className="chart-axis-caption">members currently on each plan</p>
 			</div>
 
-			{/* A table view, so the figures are readable without relying on the bars. */}
+			{/* A table view, so the figures are readable without the bars. */}
 			<details className="chart-table">
 				<summary>View as table</summary>
 				<div className="detail-list">
@@ -1737,7 +1762,6 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 		</>
 	);
 }
-
 /* ── Admin: member attendance calendar ───────────────────────────────────── */
 
 const MONTH_WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
