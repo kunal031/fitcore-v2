@@ -529,24 +529,46 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 	.txn-amount { justify-items: start; text-align: left; }
 }
 
-/* ── Analytics ────────────────────────────────────────────────────────────
+/* ── Analytics chart ──────────────────────────────────────────────────────
    Horizontal bars: the job is comparing magnitude across long plan names, so
-   the bars run horizontally and colour is one hue at varying opacity —
-   sequential, since plans are quantities to rank rather than identities to
-   tell apart. */
-.chart-panel { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.chart-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr auto; align-items: center; gap: 12px; }
+   the bars run horizontally and colour is one hue — sequential, since plans
+   are quantities to rank rather than identities to tell apart.
+
+   Thin marks against a hairline grid, rather than thick saturated blocks:
+   the reader should be measuring bars against the axis, not against each
+   other. */
+.chart-panel { display: grid; gap: 4px; padding: 18px 18px 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.chart-plot { position: relative; }
+.chart-rows { display: grid; gap: 14px; }
+
+/* Grid sits behind the bars, aligned to the track rather than the whole row. */
+/* The grid mirrors a chart row so it inherits the same column widths: a
+   spacer where the label sits, then a track matching the bars'. Insetting it
+   by a hardcoded label width drifted out of alignment. */
+.chart-grid { position: absolute; inset: 0; display: grid; grid-template-columns: var(--chart-label-w, 150px) 1fr; gap: 14px; pointer-events: none; }
+.chart-grid-track { position: relative; padding-right: 56px; box-sizing: border-box; }
+.chart-grid-inner { position: relative; display: block; width: 100%; height: 100%; }
+.chart-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+
+.chart-row { display: grid; grid-template-columns: var(--chart-label-w, 150px) 1fr; align-items: center; gap: 14px; }
 .chart-label { overflow: hidden; color: var(--muted); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .chart-archived { color: var(--danger); font-size: 11px; font-style: normal; }
 
-/* The track is the axis: a single recessive band rather than gridlines. */
-.chart-track { display: block; height: 22px; border-radius: 6px; background: var(--surface-raised); overflow: hidden; }
-/* Squared at the baseline, 4px rounded at the data end. */
-.chart-bar { display: block; height: 100%; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--accent); transition: width .45s ease; }
+/* The track carries the bar and its value; no filled background, so the grid
+   behind it stays visible. */
+.chart-track { position: relative; display: flex; align-items: center; height: 12px; padding-right: 56px; }
+.chart-bar { display: block; height: 9px; min-width: 2px; border-radius: 0 3px 3px 0; background: color-mix(in srgb, var(--accent) 82%, transparent); transition: width .45s ease; }
+.chart-row:hover .chart-bar { background: var(--accent); }
+/* Value sits past the bar end rather than inside it, so a short bar never
+   crops its own label. */
+.chart-mark-value { padding-left: 9px; color: var(--text); font-size: 12.5px; font-weight: 700; }
 
-.chart-value { display: grid; gap: 1px; justify-items: end; min-width: 62px; text-align: right; }
-.chart-value strong { font-size: 14px; }
-.chart-value small { color: var(--muted); font-size: 11px; }
+/* Axis band, inside the panel so a fixed height can never crop it. */
+.chart-axis { display: grid; grid-template-columns: var(--chart-label-w, 150px) 1fr; gap: 14px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.chart-axis-track { position: relative; height: 14px; padding-right: 56px; box-sizing: border-box; }
+.chart-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-axis-inner { position: relative; display: block; width: 100%; height: 100%; }
+.chart-axis-caption { margin: 2px 0 0; color: var(--muted); font-size: 11.5px; text-align: center; }
 
 /* A table view, so the numbers are readable without relying on the bars. */
 .chart-table { margin-top: 2px; }
@@ -556,11 +578,15 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 
 .analytics-note { margin: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
 
-@media (max-width: 560px) {
+@media (max-width: 620px) {
 	/* Long plan names need the full width on a phone, so the label sits above
-	   its bar rather than being truncated to a few characters. */
-	.chart-row { grid-template-columns: 1fr auto; row-gap: 5px; }
-	.chart-label { grid-column: 1 / -1; white-space: normal; }
+	   its bar and the grid spans the whole track. */
+	.chart-panel { --chart-label-w: 0px; }
+	.chart-row { grid-template-columns: 1fr; gap: 5px; }
+	.chart-axis { grid-template-columns: 1fr; }
+	.chart-grid { inset: 0 46px 0 0; }
+	.chart-track, .chart-axis-track { padding-right: 46px; margin-right: 0; }
+	.chart-axis-track { padding-right: 0; margin-right: 46px; }
 }
 
 /* ── Data tables ──────────────────────────────────────────────────────────
