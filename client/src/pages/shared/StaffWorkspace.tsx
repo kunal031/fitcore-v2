@@ -46,7 +46,7 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-const STAFF_TABS = ["members", "record", "plans", "coupons", "analytics", "catalogue", "profile"] as const;
+const STAFF_TABS = ["analytics", "members", "attendance", "plans", "coupons", "catalogue", "profile"] as const;
 type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
@@ -67,8 +67,9 @@ export default function StaffWorkspace({
 }) {
 	const isAdmin = user.role === "owner";
 	// Trainers land on attendance — the thing they do all day.
-	// Admins land on Members; the logo returns here.
-	const homeTab: StaffTab = "members";
+	// Admins land on Analytics and the logo returns there; trainers have no
+	// analytics tab, so they land on their member list.
+	const homeTab: StaffTab = isAdmin ? "analytics" : "members";
 	// URL-backed, so a staff view can be linked to and the back button works.
 	// Set while a member profile is open on the Members tab.
 	const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -82,11 +83,11 @@ export default function StaffWorkspace({
 		() =>
 			(isAdmin
 				? ([
+						["analytics", ChartBar, "Analytics"],
 						["members", Users, "Members"],
-						["record", CalendarCheck, "Record"],
+						["attendance", CalendarCheck, "Attendance"],
 						["plans", LayoutGrid, "Plans"],
 						["coupons", BadgePercent, "Coupons"],
-						["analytics", ChartBar, "Analytics"],
 				  ] as const)
 				: // Trainers: mark attendance, look up what is on sale, manage their
 				  // own profile. Plan and coupon editing stays with the Admin.
@@ -135,7 +136,7 @@ export default function StaffWorkspace({
 							? <MemberDetail memberId={selectedMemberId} onBack={() => setSelectedMemberId(null)} />
 							: <MemberDirectory onOpenMember={setSelectedMemberId} />
 					)}
-					{tab === "record" && <AttendanceRecorder />}
+					{tab === "attendance" && <AttendanceRecorder isAdmin={isAdmin} />}
 					{tab === "analytics" && isAdmin && <AnalyticsView />}
 					{tab === "catalogue" && <CatalogueView />}
 					{tab === "profile" && <StaffProfileView user={user} />}
@@ -1055,12 +1056,17 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 					<div className="table-wrap">
 						<table className="data-table">
 							<thead>
-								<tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
+								<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
 							</thead>
 							<tbody>
 								{visibleTrainers.map((trainer) => (
 									<tr key={trainer.id}>
-										<td data-label="Name"><strong>{trainer.full_name}</strong></td>
+										<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
+										<td data-label="Name">
+											<button className="link-button" onClick={() => onOpenMember(trainer.id)}>
+												{trainer.full_name}
+											</button>
+										</td>
 										<td data-label="Phone">{trainer.phone}</td>
 										<td data-label="Email">{trainer.email ?? "—"}</td>
 										<td data-label="Status">
@@ -1080,13 +1086,14 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 				<div className="table-wrap">
 					<table className="data-table">
 						<thead>
-							<tr><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
+							<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
 						</thead>
 						<tbody>
 							{members.map((member) => {
 								const done = checkedInIds.has(member.id);
 								return (
 									<tr key={member.id}>
+										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
 										<td data-label="Name">
 											{/* Opens the profile; the row itself stays a table row so the
 											    columns line up. */}
@@ -1162,6 +1169,8 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 
 	const todayKey = new Date().toISOString().slice(0, 10);
 	const presentToday = attendance.some((entry) => entry.date === todayKey);
+	// Staff have no plan, so check-in and plan facts do not apply to them.
+	const isStaff = member?.role === "trainer" || member?.role === "owner";
 
 	async function mark() {
 		setMarking(true); setError(""); setNotice("");
@@ -1193,22 +1202,30 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 						{member.gym_meta?.membership_status ?? "inactive"}
 					</span>
 				</div>
-				<button className="primary-action compact-button" onClick={mark} disabled={marking || presentToday}>
-					{marking ? "Marking..." : presentToday ? "Present today" : "Mark attendance"}
-				</button>
+				{/* The backend refuses check-in for staff (NO_ACTIVE_SUBSCRIPTION),
+				    so offering the button here would be a control that always fails. */}
+				{isStaff ? (
+					<span className="role-chip">{member.role === "owner" ? "Admin" : "Trainer"}</span>
+				) : (
+					<button className="primary-action compact-button" onClick={mark} disabled={marking || presentToday}>
+						{marking ? "Marking..." : presentToday ? "Present today" : "Mark attendance"}
+					</button>
+				)}
 			</div>
 
 			{notice && <div className="profile-message">{notice}</div>}
 			{error && <div className="error-message">{error}</div>}
 
-			<div className="insight-grid">
-				<article className="insight-card accent-card">
-					<CalendarCheck size={19} /><strong>{attendance.length}</strong><span>total visits</span>
-				</article>
-				<article className="insight-card">
-					<Clock size={19} /><strong>{subscription?.days_remaining ?? 0}</strong><span>visits left</span>
-				</article>
-			</div>
+			{!isStaff && (
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<CalendarCheck size={19} /><strong>{attendance.length}</strong><span>total visits</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} /><strong>{subscription?.days_remaining ?? 0}</strong><span>visits left</span>
+					</article>
+				</div>
+			)}
 
 			<div className="section-heading"><h2>Details</h2></div>
 			<div className="detail-list">
@@ -1217,10 +1234,12 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 				<Detail label="Joined" value={dateLabel(member.gym_meta?.joined_on)} />
 				<Detail label="Blood group" value={member.profile?.blood_group ?? "Not added"} />
 				<Detail label="Address" value={[member.profile?.address?.city, member.profile?.address?.state].filter(Boolean).join(", ") || "Not added"} />
-				<Detail label="Current plan" value={subscription?.plan_snapshot.plan_name ?? "No active plan"} />
-				{subscription && <Detail label="Expires" value={dateLabel(subscription.expires_on)} />}
+				{!isStaff && <Detail label="Current plan" value={subscription?.plan_snapshot.plan_name ?? "No active plan"} />}
+				{!isStaff && subscription && <Detail label="Expires" value={dateLabel(subscription.expires_on)} />}
+				<Detail label="Record ID" value={shortId(memberId)} />
 			</div>
 
+			{!isStaff && <>
 			<div className="section-heading">
 				<h2>Attendance</h2>
 				<span className="muted">{attendance.length} visits</span>
@@ -1239,6 +1258,7 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 					))}
 				</div>
 			)}
+			</>}
 		</section>
 	);
 }
@@ -1250,8 +1270,28 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
  * the list. The member profile has the same action for when staff are already
  * looking at that person.
  */
-function AttendanceRecorder() {
+/**
+ * Short, stable identifier shown in the directory and attendance tables.
+ *
+ * Mongo ids are 24 hex characters — unreadable in a table. The last six are
+ * enough to tell apart two members who share a name, which is the job, and
+ * they stay stable for the life of the record.
+ */
+function shortId(id: string) {
+	return id.slice(-6).toUpperCase();
+}
+
+/**
+ * Attendance: mark gym users present, and see which trainers are on today.
+ *
+ * Trainers are read-only here. Member check-in deducts a day from a plan
+ * quota, and staff have no plan, so the backend refuses it — offering the
+ * button would be a control that always fails.
+ */
+function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
+	const [audience, setAudience] = useState<"members" | "trainers">("members");
 	const [members, setMembers] = useState<MemberListItem[]>([]);
+	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
 	const [today, setToday] = useState<TodayCheckIn[]>([]);
 	const [summary, setSummary] = useState<TrainerDashboard | null>(null);
 	const [search, setSearch] = useState("");
@@ -1262,17 +1302,20 @@ function AttendanceRecorder() {
 
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
-		const [memberResult, todayResult, summaryResult] = await Promise.allSettled([
+		const [memberResult, todayResult, summaryResult, trainerResult] = await Promise.allSettled([
 			listMembers({ search: term, role: "member", limit: 100 }),
 			getTodayCheckIns(),
 			getTrainerDashboard(),
+			// Only admins may list trainers; a trainer's own call would 403.
+			isAdmin ? listTrainers() : Promise.resolve([] as TrainerListItem[]),
 		]);
 		if (memberResult.status === "fulfilled") { setMembers(memberResult.value.items); setError(""); }
 		else setError(apiErrorMessage(memberResult.reason));
 		if (todayResult.status === "fulfilled") setToday(todayResult.value);
 		if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
+		if (trainerResult.status === "fulfilled") setTrainers(trainerResult.value);
 		setLoading(false);
-	}, []);
+	}, [isAdmin]);
 
 	useEffect(() => { void load(""); }, [load]);
 	useEffect(() => {
@@ -1281,6 +1324,15 @@ function AttendanceRecorder() {
 	}, [search, load]);
 
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+	const showingTrainers = audience === "trainers";
+
+	const visibleTrainers = useMemo(() => {
+		const term = search.trim().toLowerCase();
+		if (!term) return trainers;
+		return trainers.filter(
+			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
+		);
+	}, [trainers, search]);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1294,6 +1346,7 @@ function AttendanceRecorder() {
 			if (refreshedToday.status === "fulfilled") setToday(refreshedToday.value);
 			if (refreshedSummary.status === "fulfilled") setSummary(refreshedSummary.value);
 		} catch (requestError) {
+			// Covers no active plan, expired plan and exhausted quota.
 			setError(apiErrorMessage(requestError));
 		} finally {
 			setMarkingId(null);
@@ -1303,11 +1356,30 @@ function AttendanceRecorder() {
 	return (
 		<section className="view-stack">
 			<div className="section-heading">
-				<div><p className="eyebrow">Record</p><h2>Mark attendance</h2></div>
+				<div><p className="eyebrow">Attendance</p><h2>{showingTrainers ? "Trainers on today" : "Mark attendance"}</h2></div>
 				<span className="muted">{today.length} checked in today</span>
 			</div>
 
-			{summary && (
+			{isAdmin && (
+				<nav className="section-jump" aria-label="Choose who to record">
+					<button
+						className={showingTrainers ? "jump-pill" : "jump-pill active"}
+						aria-current={showingTrainers ? undefined : "true"}
+						onClick={() => setAudience("members")}
+					>
+						Gym users
+					</button>
+					<button
+						className={showingTrainers ? "jump-pill active" : "jump-pill"}
+						aria-current={showingTrainers ? "true" : undefined}
+						onClick={() => setAudience("trainers")}
+					>
+						Trainers
+					</button>
+				</nav>
+			)}
+
+			{summary && !showingTrainers && (
 				<div className="insight-grid">
 					<article className="insight-card accent-card">
 						<CalendarCheck size={19} /><strong>{summary.checkins_today}</strong><span>checked in today</span>
@@ -1320,36 +1392,81 @@ function AttendanceRecorder() {
 
 			<div className="search-row">
 				<Search size={16} />
-				<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone" aria-label="Search members" />
+				<input
+					value={search}
+					onChange={(e) => setSearch(e.target.value)}
+					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+					aria-label="Search"
+				/>
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
 
 			{loading ? (
-				<div className="loading-state">Loading members...</div>
+				<div className="loading-state">Loading...</div>
+			) : showingTrainers ? (
+				visibleTrainers.length === 0 ? (
+					<div className="empty-state">No trainers matched your search.</div>
+				) : (
+					<>
+						<div className="table-wrap">
+							<table className="data-table">
+								<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
+								<tbody>
+									{visibleTrainers.map((trainer) => (
+										<tr key={trainer.id}>
+											<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
+											<td data-label="Name"><strong>{trainer.full_name}</strong></td>
+											<td data-label="Email">{trainer.email ?? "—"}</td>
+											<td data-label="Status">
+												<span className={trainer.is_active ? "status-dot" : "muted"}>
+													{trainer.is_active ? "Active" : "Inactive"}
+												</span>
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						<p className="muted catalogue-note">
+							Trainer shifts are not tracked as gym attendance — check-in draws down a
+							member plan, which staff accounts do not have.
+						</p>
+					</>
+				)
 			) : members.length === 0 ? (
-				<div className="empty-state">No members matched your search.</div>
+				<div className="empty-state">No gym users matched your search.</div>
 			) : (
-				<div className="history-list">
-					{members.map((member) => {
-						const done = checkedInIds.has(member.id);
-						return (
-							<article className="history-row" key={member.id}>
-								<div>
-									<strong>{member.full_name}</strong>
-									<span>{member.phone} · {member.gym_meta.membership_status}</span>
-								</div>
-								{done ? (
-									<span className="status-dot">Present today</span>
-								) : (
-									<button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
-										{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
-									</button>
-								)}
-							</article>
-						);
-					})}
+				<div className="table-wrap">
+					<table className="data-table">
+						<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Attendance</th></tr></thead>
+						<tbody>
+							{members.map((member) => {
+								const done = checkedInIds.has(member.id);
+								return (
+									<tr key={member.id}>
+										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+										<td data-label="Name"><strong>{member.full_name}</strong></td>
+										<td data-label="Email">{member.email ?? "—"}</td>
+										<td data-label="Attendance">
+											{done ? (
+												<span className="status-dot">Present today</span>
+											) : (
+												<button
+													className="outline-button compact-button"
+													onClick={() => mark(member)}
+													disabled={markingId === member.id}
+												>
+													{markingId === member.id ? "Marking..." : "Mark attendance"}
+												</button>
+											)}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
 				</div>
 			)}
 		</section>
