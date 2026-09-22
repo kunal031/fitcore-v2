@@ -6,14 +6,25 @@ import type {
   CouponUpdateInput,
   ValidateCouponQuery,
 } from "../dtos/coupon.dto.js";
+import { ROLES } from "../config/constants.js";
 import { asyncHandler, currentUser } from "../middleware/index.js";
 import { couponService } from "../services/index.js";
 import { success } from "../utils/apiResponse.js";
 
 export const couponController = {
-  /** GET /coupons — staff (trainer or owner). Members never see the list. */
-  listAll: asyncHandler(async (_req: Request, res: Response) => {
-    res.json(success(await couponService.listAll()));
+  /**
+   * GET /coupons
+   *
+   * Staff get the full catalogue; members get only offers they could redeem
+   * today, so expired and exhausted codes never reach the member UI.
+   */
+  listAll: asyncHandler(async (req: Request, res: Response) => {
+    const user = currentUser(req);
+    const data =
+      user.role === ROLES.MEMBER
+        ? await couponService.listRedeemable()
+        : await couponService.listAll();
+    res.json(success(data));
   }),
 
   /** POST /coupons — 201. Owner only. */

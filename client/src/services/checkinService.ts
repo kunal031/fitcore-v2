@@ -45,3 +45,18 @@ export async function getTrainerDashboard() {
 	const response = await api.get<{ data: TrainerDashboard }>("/dashboard/trainer");
 	return response.data.data;
 }
+
+export interface AttendanceRecord {
+	date: string;
+	check_in_time: string;
+	check_out_time?: string | null;
+	marked_by: string;
+}
+
+/** Every attendance entry for a member, across all their subscriptions. */
+export async function getMemberAttendance(memberId: string) {
+	const response = await api.get<{ data: AttendanceRecord[] }>("/checkin/history", {
+		params: { member_id: memberId },
+	});
+	return response.data.data ?? [];
+}

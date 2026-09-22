@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Dumbbell } from "lucide-react";
 
+import gymHero from "../../assets/images/gym-hero.webp";
 import { apiErrorMessage } from "../../lib/axios";
 import { login } from "../../services/authService";
 import { useAuthStore } from "../../store/authStore";
@@ -21,7 +22,7 @@ export default function LoginPage() {
 		try {
 			const result = await login(identifier, password);
 			setSession(result.user, result.access_token, result.refresh_token);
-			navigate("/", { replace: true });
+			navigate("/app/home", { replace: true });
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
@@ -32,8 +33,12 @@ export default function LoginPage() {
 	return (
 		<main className="auth-layout">
 			<section className="auth-art">
-				<div className="brand"><span className="brand-mark"><Dumbbell size={18} /></span><span className="brand-text">FITCORE</span></div>
-				<h1>Train with intention.</h1>
+				{/* Decorative only — the heading beside it carries the meaning, so
+				    an empty alt keeps screen readers from announcing it twice. */}
+				<img className="auth-art-image" src={gymHero} alt="" aria-hidden="true" />
+				<div className="auth-art-content">
+					<div className="brand"><span className="brand-mark"><Dumbbell size={18} /></span><span className="brand-text">FITCORE</span></div>
+				</div>
 			</section>
 			<section className="auth-panel">
 				<div className="auth-card">

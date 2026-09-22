@@ -78,6 +78,44 @@ export const subscriptionRepository = {
   },
 
   /**
+   * Every subscription ever sold, grouped by plan.
+   *
+   * Returns both the current members and the lifetime count per plan, in one
+   * round trip, for the analytics breakdown.
+   */
+  async countAllByPlan(): Promise<Map<string, { active: number; total: number }>> {
+    const rows = await Subscription.aggregate<{
+      _id: Types.ObjectId;
+      total: number;
+      active: number;
+    }>([
+      {
+        $group: {
+          _id: "$plan_id",
+          total: { $sum: 1 },
+          active: {
+            $sum: { $cond: [{ $eq: ["$status", SUBSCRIPTION_STATUS.ACTIVE] }, 1, 0] },
+          },
+        },
+      },
+    ]).exec();
+
+    return new Map(rows.map((row) => [String(row._id), { active: row.active, total: row.total }]));
+  },
+
+  /** Distinct members who have ever held a subscription. */
+  async listUserIdsWithAnySubscription(): Promise<Set<string>> {
+    const ids = await Subscription.distinct("user_id").exec();
+    return new Set(ids.map(String));
+  },
+
+  /** Distinct members holding a subscription in any of the given states. */
+  async listUserIdsByStatus(statuses: string[]): Promise<Set<string>> {
+    const ids = await Subscription.distinct("user_id", { status: { $in: statuses } }).exec();
+    return new Set(ids.map(String));
+  },
+
+  /**
    * Count active subscriptions per plan in one aggregation.
    *
    * The Python dashboard issues one count per plan; this collapses that into a

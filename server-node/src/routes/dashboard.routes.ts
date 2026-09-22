@@ -15,6 +15,10 @@ dashboardRoutes.use(requireAuth);
 
 dashboardRoutes.get("/owner", requireOwner, dashboardController.getOwnerDashboard);
 
+// Membership and plan analytics. Owner only — it exposes the whole catalogue's
+// performance, not just today's floor.
+dashboardRoutes.get("/analytics", requireOwner, dashboardController.getAnalytics);
+
 dashboardRoutes.get(
   "/trainer",
   requireTrainerOrOwner,

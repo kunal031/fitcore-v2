@@ -73,6 +73,34 @@ export const userRepository = {
     return User.find({ role: ROLES.TRAINER, is_active: true }).exec();
   },
 
+  /** Members by membership status, in one aggregation. */
+  async countMembersByStatus(): Promise<Map<string, number>> {
+    const rows = await User.aggregate<{ _id: string; count: number }>([
+      { $match: { role: ROLES.MEMBER } },
+      { $group: { _id: "$gym_meta.membership_status", count: { $sum: 1 } } },
+    ]).exec();
+    return new Map(rows.map((row) => [row._id, row.count]));
+  },
+
+  /** Members whose account has been deactivated. */
+  countInactiveAccounts(): Promise<number> {
+    return User.countDocuments({ role: ROLES.MEMBER, is_active: false }).exec();
+  },
+
+  /** Members who joined on or after the given calendar date. */
+  countMembersJoinedSince(dateStr: string): Promise<number> {
+    return User.countDocuments({
+      role: ROLES.MEMBER,
+      "gym_meta.joined_on": { $gte: dateStr },
+    }).exec();
+  },
+
+  /** Ids of every member, for set arithmetic against subscription holders. */
+  async listMemberIds(): Promise<string[]> {
+    const ids = await User.distinct("_id", { role: ROLES.MEMBER }).exec();
+    return ids.map(String);
+  },
+
   countByRole(role: string): Promise<number> {
     return User.countDocuments({ role }).exec();
   },

@@ -6,6 +6,7 @@
  */
 import type { UserDoc } from "../../models/User.js";
 import type { UserRead } from "../../dtos/user.dto.js";
+import { toCalendarDateStr } from "../../utils/date.js";
 
 export function toUserRead(user: UserDoc): UserRead {
   const address = user.profile?.address ?? {
@@ -22,7 +23,7 @@ export function toUserRead(user: UserDoc): UserRead {
     email: user.email ?? null,
     role: user.role,
     profile: {
-      dob: user.profile?.dob ?? null,
+      dob: toCalendarDateStr(user.profile?.dob) ?? null,
       blood_group: user.profile?.blood_group ?? null,
       gender: user.profile?.gender ?? null,
       avatar_url: user.profile?.avatar_url ?? null,
@@ -34,7 +35,9 @@ export function toUserRead(user: UserDoc): UserRead {
       },
     },
     gym_meta: {
-      joined_on: user.gym_meta.joined_on,
+      // Accounts created by the FastAPI server hold a BSON date here rather
+      // than a YYYY-MM-DD string; normalise so the client always gets one shape.
+      joined_on: toCalendarDateStr(user.gym_meta.joined_on) ?? user.gym_meta.joined_on,
       membership_status: user.gym_meta.membership_status,
       assigned_trainer_id: user.gym_meta.assigned_trainer_id
         ? String(user.gym_meta.assigned_trainer_id)

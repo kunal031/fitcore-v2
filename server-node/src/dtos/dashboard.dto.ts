@@ -44,3 +44,48 @@ export interface TrainerDashboardResponse {
   expiring_soon_count: number;
   last_checkin: LastCheckInInfo | null;
 }
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+
+export interface MemberAnalytics {
+  total_registered: number;
+  active: number;
+  inactive: number;
+  /** Never bought a plan. */
+  never_subscribed: number;
+  /**
+   * Bought before, plan has since expired, and they have not renewed.
+   * The win-back list.
+   */
+  lapsed: number;
+  /** Deactivated accounts, excluded from the active/inactive split above. */
+  suspended: number;
+  joined_this_month: number;
+}
+
+export interface PlanBreakdownItem {
+  plan_id: string;
+  plan_name: string;
+  is_active: boolean;
+  price_paise: number;
+  /** Members currently on this plan. */
+  active_members: number;
+  /** Every subscription ever sold against it, including expired. */
+  total_sold: number;
+  revenue_paise: number;
+}
+
+export interface PlanAnalytics {
+  total_plans: number;
+  active_plans: number;
+  inactive_plans: number;
+  most_bought: PlanBreakdownItem | null;
+  least_bought: PlanBreakdownItem | null;
+  /** Per-plan figures, for the chart. Sorted by members, descending. */
+  breakdown: PlanBreakdownItem[];
+}
+
+export interface AnalyticsResponse {
+  members: MemberAnalytics;
+  plans: PlanAnalytics;
+}

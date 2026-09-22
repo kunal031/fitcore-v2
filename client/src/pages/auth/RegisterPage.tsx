@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, Dumbbell } from "lucide-react";
 
+import gymHero from "../../assets/images/gym-hero.webp";
 import { apiErrorMessage } from "../../lib/axios";
 import { register } from "../../services/authService";
 import { useAuthStore } from "../../store/authStore";
@@ -21,7 +22,7 @@ export default function RegisterPage() {
 		try {
 			const result = await register(form);
 			setSession(result.user, result.access_token, result.refresh_token);
-			navigate("/", { replace: true });
+			navigate("/app/home", { replace: true });
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
@@ -31,7 +32,16 @@ export default function RegisterPage() {
 
 	return (
 		<main className="auth-layout">
-			<section className="auth-art"><div className="brand"><span className="brand-mark"><Dumbbell size={18} /></span><span className="brand-text">FITCORE</span></div><h1>Start your next chapter.</h1><p>Build a steady rhythm with a plan that fits your goals and a record that keeps you moving.</p></section>
+			<section className="auth-art">
+				{/* Decorative only — the heading beside it carries the meaning. */}
+				<img className="auth-art-image" src={gymHero} alt="" aria-hidden="true" />
+				<div className="auth-art-content">
+					<div className="brand"><span className="brand-mark"><Dumbbell size={18} /></span><span className="brand-text">FITCORE</span></div>
+					<div className="auth-art-copy">
+						<h1>Start your next chapter.</h1>
+					</div>
+				</div>
+			</section>
 			<section className="auth-panel"><div className="auth-card"><p className="eyebrow">Join FitCore</p><h2>Create your account.</h2><p className="muted">Your member account starts with a few simple details.</p>
 				<form onSubmit={handleSubmit}>
 					<div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} required /></div>

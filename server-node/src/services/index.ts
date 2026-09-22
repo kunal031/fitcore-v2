@@ -9,5 +9,6 @@ export { paymentService } from "./payment.service.js";
 export { couponService, calculateDiscountPaise } from "./coupon.service.js";
 export { referralService } from "./referral.service.js";
 export { dashboardService } from "./dashboard.service.js";
+export { analyticsService } from "./analytics.service.js";
 export { razorpayService } from "./razorpay.service.js";
 export * from "./mappers/index.js";

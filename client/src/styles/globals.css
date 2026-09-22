@@ -23,6 +23,7 @@
 	--danger: #ff8278;
 }
 
+:root { --header-h: 67px; --sidebar-w: 216px; }
 :root[data-theme="light"] { --bg: #f3f6f2; --surface: #ffffff; --surface-raised: #e8eee8; --line: rgba(20, 31, 30, .12); --text: #17211f; --muted: #60706c; --accent: #78ad00; --accent-ink: #fff; --danger: #b53e36; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
@@ -32,7 +33,18 @@ button { cursor: pointer; }
 
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 850; letter-spacing: .08em; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--accent-ink); background: var(--accent); }
-.mobile-header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; padding: 12px max(20px, calc((100vw - 1160px) / 2)); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(18px); }
+/* Three columns: a spacer, the logo, and the actions. The outer columns are
+   equal width so the logo lands in the true centre of the bar regardless of
+   how many action buttons a role has. */
+.mobile-header { position: sticky; top: 0; z-index: 6; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(18px); }
+.header-side { min-width: 0; }
+.mobile-header .header-actions { justify-self: end; }
+/* The logo is a button (it navigates home) but should read as a wordmark. */
+.brand-button { padding: 4px 8px; border: 0; border-radius: 12px; background: transparent; transition: opacity .18s ease; }
+.brand-button:hover { opacity: .78; }
+.brand-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mobile-header .brand { justify-self: center; font-size: 17px; letter-spacing: .1em; }
+.mobile-header .brand-mark { width: 38px; height: 38px; border-radius: 11px; }
 .header-actions, .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--text); background: var(--surface); }
 .role-chip, .plan-category { padding: 6px 9px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
@@ -78,7 +90,7 @@ h3 { margin-bottom: 7px; }
 .renew-alert { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 15px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 14px; color: var(--text); text-align: left; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
 .renew-alert span { display: grid; gap: 5px; }.renew-alert small { color: var(--muted); }
 .current-plan, .profile-card, .referral-code, .later-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.back-button { width: fit-content; border: 0; color: var(--accent); background: transparent; font-weight: 800; }
+.back-button { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 0; border: 0; color: var(--accent); background: transparent; font-weight: 800; scroll-margin-top: calc(var(--header-h) + 16px); }
 .checkout-card { display: grid; gap: 16px; max-width: 620px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
 .checkout-plan h2 { margin: 10px 0 6px; font-size: 24px; }.checkout-plan p { margin: 0; color: var(--muted); line-height: 1.5; }
 .checkout-total { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }.checkout-total span { color: var(--muted); }.checkout-total strong { font-size: 26px; }
@@ -144,13 +156,25 @@ h3 { margin-bottom: 7px; }
    dashboard — an earlier copy of this block was unscoped and was silently
    overriding .eyebrow, .muted, .brand-mark and .role-chip app-wide. */
 .auth-layout { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 0.9fr; background: #f4f7f5; }
-.auth-layout .auth-art { position: relative; overflow: hidden; padding: 48px; color: #f8fbf8; background: linear-gradient(145deg, #102a43 0%, #1f4e5f 55%, #4d7c75 100%); }
-.auth-layout .auth-art::after { content: ""; position: absolute; width: 420px; height: 420px; right: -120px; bottom: -160px; border: 1px solid rgba(255,255,255,.22); border-radius: 50%; box-shadow: 0 0 0 52px rgba(255,255,255,.05), 0 0 0 104px rgba(255,255,255,.04); }
-.auth-layout .brand { color: #f8fbf8; font-weight: 800; letter-spacing: .04em; }
+.auth-layout .auth-art { position: relative; overflow: hidden; padding: 40px; color: #f8fbf8; background: #0d1416; }
+/* The photo fills the panel and is cropped rather than squashed. It is square,
+   so on a tall viewport `cover` crops the sides — the subject is centred, so
+   that is the side to lose. */
+.auth-layout .auth-art-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 22%; }
+/* Darkened from the bottom so the heading stays legible over the photo
+   whatever the image happens to be behind it. */
+/* Darkened at both ends: the bottom carries the headline, the top keeps the
+   wordmark legible over a bright ceiling. */
+.auth-layout .auth-art::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(8,14,15,.97) 0%, rgba(8,14,15,.90) 24%, rgba(8,14,15,.48) 56%, rgba(8,14,15,.22) 76%, rgba(8,14,15,.62) 100%); }
+/* Content sits above the image and the scrim; the panel is the stacking
+   context, so a z-index here is enough. */
+.auth-layout .auth-art-content { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: space-between; min-height: 100%; gap: 24px; }
+.auth-layout .auth-art-copy { max-width: 470px; }
+.auth-layout .brand { color: #f8fbf8; font-weight: 800; letter-spacing: .04em; text-shadow: 0 1px 10px rgba(0,0,0,.55); }
 .auth-layout .brand-mark { color: #17324d; background: #f2c14e; }
-.auth-layout .auth-art h1 { max-width: 560px; margin: 12vh 0 16px; font-size: clamp(38px, 4.4vw, 62px); line-height: 1; letter-spacing: 0; }
-.auth-layout .auth-art p { max-width: 440px; color: #d8e7e3; font-size: 16px; line-height: 1.55; }
-.auth-layout .auth-panel { display: grid; place-items: center; padding: 28px; background: #fbfcfa; }
+.auth-layout .auth-art h1 { max-width: 9ch; margin: 0 0 12px; font-size: clamp(32px, 3.2vw, 46px); line-height: 1.04; letter-spacing: -.01em; text-wrap: balance; text-shadow: 0 2px 24px rgba(0,0,0,.5); }
+.auth-layout .auth-art p { max-width: 440px; margin: 0; color: rgba(240,246,245,.94); font-size: 15.5px; line-height: 1.55; text-shadow: 0 1px 12px rgba(0,0,0,.6); }
+.auth-layout .auth-panel { display: grid; place-items: center; align-content: center; padding: 40px 28px; background: #fbfcfa; }
 .auth-layout .auth-card { width: min(100%, 430px); }
 .auth-layout .eyebrow { margin: 0 0 8px; color: #4d7c75; }
 .auth-layout .auth-card h2 { margin: 0; color: #102a43; font-size: 32px; line-height: 1.05; }
@@ -164,7 +188,7 @@ h3 { margin-bottom: 7px; }
 .auth-layout .primary-button:disabled { cursor: wait; opacity: .65; }
 .auth-layout .error-message { color: #9c2f2f; background: #fff0ee; }
 .auth-layout .demo-note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid #f2c14e; color: #536675; background: #f4f7f5; font-size: 13px; line-height: 1.5; }
-@media (max-width: 760px) { .auth-layout { display: block; } .auth-layout .auth-art { min-height: 250px; padding: 24px; } .auth-layout .auth-art h1 { margin: 44px 0 10px; font-size: 38px; } .auth-layout .auth-art p { font-size: 14px; } .auth-layout .auth-panel { min-height: calc(100vh - 250px); padding: 30px 22px; } .auth-layout .brand-text { display: none; } }
+@media (max-width: 760px) { .auth-layout { display: block; } .auth-layout .auth-art { min-height: 300px; padding: 22px; } .auth-layout .auth-art-image { object-position: center 18%; } .auth-layout .auth-art-content { min-height: 0; height: 100%; } .auth-layout .auth-art h1 { font-size: 32px; } .auth-layout .auth-art p { font-size: 14px; } .auth-layout .auth-panel { min-height: calc(100vh - 300px); padding: 28px 22px 40px; align-content: start; } }
 
 /* ── Checkout coupons ─────────────────────────────────────────────────── */
 .coupon-box { display: grid; gap: 8px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -283,33 +307,34 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 
 /* Desktop: the same nav becomes a sidebar beside the content. */
 @media (min-width: 900px) {
+	/* The rail is fixed, so the content is simply pushed past it. The nav
+	   stays last in the DOM so keyboard focus reaches page content first. */
 	.app-body {
-		display: grid;
-		/* Sidebar first in the visual order, content second. The nav stays
-		   last in the DOM so keyboard focus reaches the page content before
-		   the navigation. */
-		grid-template-columns: 208px minmax(0, 1fr);
-		align-items: start;
-		width: min(100% - 40px, 1240px);
-		margin: 0 auto;
-		gap: 24px;
-	}
-
-	.app-nav {
-		position: sticky;
-		/* Clears the sticky header. */
-		top: 72px;
-		z-index: 1;
-		grid-column: 1;
-		grid-row: 1;
-		grid-auto-flow: row;
-		grid-auto-columns: auto;
-		gap: 2px;
+		display: block;
 		width: auto;
 		margin: 0;
-		padding: 8px;
-		border: 1px solid var(--line);
-		border-radius: 16px;
+		padding-left: var(--sidebar-w);
+	}
+
+	/* A full-height rail flush to the left edge, running from under the
+	   header to the bottom of the viewport — not a floating card. Only the
+	   right edge is drawn, so it reads as a division of the page. */
+	.app-nav {
+		position: fixed;
+		top: var(--header-h);
+		bottom: 0;
+		left: 0;
+		z-index: 4;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: var(--sidebar-w);
+		margin: 0;
+		padding: 16px 12px;
+		overflow-y: auto;
+		border: 0;
+		border-right: 1px solid var(--line);
+		border-radius: 0;
 		background: var(--surface);
 		backdrop-filter: none;
 	}
@@ -334,10 +359,9 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 	/* The content column owns the width now, so the inner wrappers stop
 	   constraining it and the bottom padding drops to normal page spacing. */
 	.member-main, .staff-main {
-		grid-column: 2;
-		grid-row: 1;
-		width: 100%;
+		width: min(100% - 56px, 1180px);
 		max-width: none;
+		margin: 0 auto;
 		padding: 24px 0 48px;
 	}
 }
@@ -355,4 +379,215 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 	/* The member home pairs its cards with the plan card, so it keeps the
 	   equal-width three-up row defined above. */
 	.home-split .insight-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ── Member home ──────────────────────────────────────────────────────────
+   Two rows: current plan beside the plan list, then the attendance calendar
+   beside this week and the invite prompt. Single column on mobile. */
+.home-row { display: grid; gap: 12px; }
+.home-column { display: grid; gap: 12px; align-content: start; }
+
+.panel { display: grid; gap: 12px; align-content: start; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.panel-head .eyebrow { margin: 0; }
+.panel-empty { display: grid; gap: 12px; justify-items: start; padding: 8px 0; color: var(--muted); }
+.panel-empty p { margin: 0; }
+
+/* ── Current plan ─────────────────────────────────────────────────────── */
+.plan-panel-ring { display: flex; align-items: center; gap: 16px; }
+.plan-panel-head { display: grid; gap: 3px; min-width: 0; }
+.plan-panel-name { margin: 0; font-size: 20px; letter-spacing: -.02em; line-height: 1.15; }
+.plan-panel-head .muted { margin: 0; font-size: 12.5px; }
+.plan-panel-price { color: var(--accent); font-size: 17px; }
+
+/* Visit usage. The ring shows what is left; this shows progress through it. */
+.plan-progress { display: grid; gap: 6px; }
+.plan-progress-track { height: 6px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
+.plan-progress-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width .4s ease; }
+.plan-progress-labels { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+
+/* Dates and renewal window, three across. */
+.plan-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0; padding: 12px 0 0; border-top: 1px solid var(--line); }
+.plan-facts div { display: grid; gap: 2px; min-width: 0; }
+.plan-facts dt { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.plan-facts dd { margin: 0; font-size: 13px; font-weight: 700; }
+
+.plan-panel-action { margin-top: 0; justify-content: center; gap: 6px; }
+
+/* ── Explore plans: one row per plan ──────────────────────────────────── */
+.plan-rows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.plan-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--bg); text-align: left; transition: border-color .15s ease, transform .15s ease; }
+.plan-row:hover { border-color: var(--accent); transform: translateX(2px); }
+.plan-row svg { flex-shrink: 0; color: var(--muted); }
+.plan-row-main { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.plan-row-main strong { font-size: 14.5px; }
+.plan-row-main small { color: var(--muted); font-size: 12px; }
+.plan-row-price { flex-shrink: 0; color: var(--accent); font-weight: 800; font-size: 14.5px; }
+
+/* ── Attendance calendar ──────────────────────────────────────────────── */
+.calendar-month { margin: -6px 0 0; font-size: 15px; font-weight: 700; }
+.calendar-nav { display: flex; align-items: center; gap: 8px; }
+.calendar-nav .text-button { font-size: 12.5px; }
+.compact-icon { width: 28px; height: 28px; }
+.compact-icon:disabled { opacity: .35; cursor: not-allowed; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar-weekday { display: grid; place-items: center; padding-bottom: 2px; color: var(--muted); font-size: 10.5px; font-weight: 700; }
+.calendar-cell { display: grid; place-items: center; height: 30px; border-radius: 9px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.calendar-cell.empty { visibility: hidden; }
+.calendar-cell.future { opacity: .35; }
+/* A visit is the one thing worth spotting at a glance, so it gets the accent. */
+.calendar-cell.attended { color: var(--accent-ink); background: var(--accent); font-weight: 800; }
+.calendar-cell.is-today { outline: 1.5px solid var(--accent); outline-offset: -1.5px; color: var(--text); }
+.calendar-cell.is-today.attended { color: var(--accent-ink); }
+.calendar-summary { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; }
+.calendar-key { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+
+/* ── This week strip ──────────────────────────────────────────────────── */
+.week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.week-day { display: grid; place-items: center; gap: 1px; padding: 8px 0; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); }
+.week-day em { font-size: 10px; font-style: normal; font-weight: 700; }
+.week-day b { font-size: 14px; font-weight: 800; }
+.week-day.attended { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.week-day.is-today { border-color: var(--accent); color: var(--text); }
+.week-day.is-today.attended { color: var(--accent-ink); }
+.week-summary { margin: 0; font-size: 12.5px; }
+
+/* ── Invite prompt ────────────────────────────────────────────────────── */
+.invite-panel { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--text); text-align: left; border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.invite-panel:hover { border-color: var(--accent); }
+.invite-panel span { display: grid; gap: 3px; }
+.invite-panel strong { font-size: 15px; }
+.invite-panel small { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.invite-panel svg { flex-shrink: 0; color: var(--accent); }
+
+/* The avatar opens profile management, so it needs button affordances. */
+.avatar-button { border: 0; transition: transform .16s ease; }
+.avatar-button:hover { transform: scale(1.05); }
+.avatar-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+@media (min-width: 900px) {
+	/* Current plan is the narrower of the two; the plan list needs the room.
+	   `align-items: start` stops the shorter panel in each row from being
+	   stretched to match its taller neighbour. */
+	.home-row-top,
+	.home-row-bottom { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); align-items: start; }
+}
+
+/* ── Section jump navigation (plans page) ─────────────────────────────────
+   Sticks below the header so the sections stay reachable while scrolling. */
+.section-jump { position: sticky; top: var(--header-h); z-index: 3; display: flex; gap: 7px; margin: 0 0 4px; padding: 10px 0; overflow-x: auto; scrollbar-width: none; background: linear-gradient(to bottom, var(--bg) 78%, transparent); }
+.section-jump::-webkit-scrollbar { display: none; }
+
+.jump-pill { flex-shrink: 0; padding: 8px 15px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 13px; font-weight: 700; white-space: nowrap; transition: color .15s ease, background .15s ease, border-color .15s ease; }
+.jump-pill:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.jump-pill.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.jump-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Clears the sticky header and the pill bar when a section is scrolled to. */
+.jump-target { scroll-margin-top: calc(var(--header-h) + 62px); }
+.jump-target { display: grid; gap: 12px; }
+
+/* Respect a reduced-motion preference for the smooth scroll. */
+@media (prefers-reduced-motion: reduce) {
+	html { scroll-behavior: auto; }
+}
+
+/* ── Previous passes: clickable rows ──────────────────────────────────── */
+.pass-row { width: 100%; border: 0; border-bottom: 1px solid var(--line); color: var(--text); background: none; text-align: left; cursor: pointer; transition: background .15s ease; }
+.pass-row:last-child { border-bottom: 0; }
+.pass-row:hover { background: var(--surface-raised); }
+.pass-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pass-row > svg { flex-shrink: 0; color: var(--muted); }
+.pass-row-right { display: grid; gap: 2px; justify-items: end; text-align: right; }
+.pass-row-right .muted { font-size: 11.5px; color: var(--accent); }
+
+/* ── Transaction log: two-line rows ───────────────────────────────────── */
+/* Receipt and status on the first line, plan/date/method on the second, so
+   nothing is truncated on a narrow screen. */
+.txn-lines { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.txn-line-1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.txn-line-1 strong { font-size: 14.5px; letter-spacing: .02em; }
+.txn-line-2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.txn-dot { opacity: .5; }
+
+.txn-amount { display: grid; gap: 1px; justify-items: end; flex-shrink: 0; text-align: right; }
+.txn-amount strong { font-size: 15px; }
+.txn-amount small { color: var(--accent); font-size: 11px; font-weight: 700; }
+
+.txn-chevron { flex-shrink: 0; color: var(--muted); transition: transform .2s ease; }
+.txn-chevron.open { transform: rotate(90deg); color: var(--accent); }
+
+/* The payment opened from a pass is highlighted so it is findable in a list. */
+.payment-row.focused { border-color: var(--accent); }
+
+.receipt-actions { display: flex; justify-content: flex-end; padding-top: 12px; margin-top: 4px; border-top: 1px solid var(--line); }
+.receipt-actions .outline-button { display: inline-flex; align-items: center; gap: 7px; width: auto; margin: 0; }
+
+@media (max-width: 480px) {
+	/* Stack the amount under the detail rather than squeezing three columns. */
+	.payment-row-head { flex-wrap: wrap; }
+	.txn-amount { justify-items: start; text-align: left; }
+}
+
+/* ── Analytics ────────────────────────────────────────────────────────────
+   Horizontal bars: the job is comparing magnitude across long plan names, so
+   the bars run horizontally and colour is one hue at varying opacity —
+   sequential, since plans are quantities to rank rather than identities to
+   tell apart. */
+.chart-panel { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.chart-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr auto; align-items: center; gap: 12px; }
+.chart-label { overflow: hidden; color: var(--muted); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.chart-archived { color: var(--danger); font-size: 11px; font-style: normal; }
+
+/* The track is the axis: a single recessive band rather than gridlines. */
+.chart-track { display: block; height: 22px; border-radius: 6px; background: var(--surface-raised); overflow: hidden; }
+/* Squared at the baseline, 4px rounded at the data end. */
+.chart-bar { display: block; height: 100%; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--accent); transition: width .45s ease; }
+
+.chart-value { display: grid; gap: 1px; justify-items: end; min-width: 62px; text-align: right; }
+.chart-value strong { font-size: 14px; }
+.chart-value small { color: var(--muted); font-size: 11px; }
+
+/* A table view, so the numbers are readable without relying on the bars. */
+.chart-table { margin-top: 2px; }
+.chart-table summary { padding: 8px 0; color: var(--accent); font-size: 13px; font-weight: 700; cursor: pointer; }
+.chart-table summary::marker { color: var(--muted); }
+.chart-table .detail-list { margin-top: 6px; }
+
+.analytics-note { margin: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
+
+@media (max-width: 560px) {
+	/* Long plan names need the full width on a phone, so the label sits above
+	   its bar rather than being truncated to a few characters. */
+	.chart-row { grid-template-columns: 1fr auto; row-gap: 5px; }
+	.chart-label { grid-column: 1 / -1; white-space: normal; }
+}
+
+/* ── Data tables ──────────────────────────────────────────────────────────
+   Used by the admin directory. Below 720px each row becomes a card with the
+   column name as a label, because a four-column table cannot be read on a
+   phone without horizontal scrolling. */
+.table-wrap { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.data-table th { padding: 11px 15px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+.data-table td { padding: 12px 15px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.data-table tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover { background: var(--surface-raised); }
+.data-table td:last-child { text-align: right; white-space: nowrap; }
+.data-table th:last-child { text-align: right; }
+
+/* The member's name opens their profile; it is a button so it is reachable
+   by keyboard, but it should read as a link inside the cell. */
+.link-button { padding: 0; border: 0; color: var(--text); background: none; font: inherit; font-weight: 700; text-align: left; }
+.link-button:hover { color: var(--accent); text-decoration: underline; }
+.link-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+@media (max-width: 720px) {
+	.data-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+	.data-table tr { display: grid; gap: 6px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+	.data-table tr:last-child { border-bottom: 0; }
+	.data-table td { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0; border: 0; text-align: left; }
+	.data-table td:last-child { text-align: left; }
+	/* The column name, carried from the cell's data-label. */
+	.data-table td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 }

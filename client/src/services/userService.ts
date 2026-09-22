@@ -46,3 +46,25 @@ export async function listMembers(params: { page?: number; limit?: number; searc
 	});
 	return response.data.data ?? { items: [], meta: { page: 1, limit: 50, total: 0, pages: 0 } };
 }
+
+/** Full profile for one member. Staff only. */
+export async function getUserById(userId: string) {
+	const response = await api.get<{ data: MemberProfile }>(`/users/${userId}`);
+	return response.data.data;
+}
+
+export interface TrainerListItem {
+	id: string;
+	full_name: string;
+	phone: string;
+	email?: string | null;
+	role: string;
+	is_active: boolean;
+	gym_meta: { joined_on: string; membership_status: string };
+}
+
+/** Every active trainer. Owner only. */
+export async function listTrainers() {
+	const response = await api.get<{ data: TrainerListItem[] }>("/users/trainers");
+	return response.data.data ?? [];
+}
