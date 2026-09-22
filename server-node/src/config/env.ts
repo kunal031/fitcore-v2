@@ -35,7 +35,19 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
 });
 
-const parsed = envSchema.safeParse(process.env);
+/**
+ * Treat an empty variable as absent.
+ *
+ * A hosting dashboard will happily save a key with a blank value, and an
+ * empty string coerces to 0 — which failed the port check and crashed the
+ * container on boot with a message that read like a code bug. Blank means
+ * "not set", so the default applies.
+ */
+const rawEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([, value]) => value !== undefined && value.trim() !== ""),
+);
+
+const parsed = envSchema.safeParse(rawEnv);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
