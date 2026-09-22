@@ -110,6 +110,40 @@ export const userRepository = {
     });
   },
 
+  /** Members by id, in list order. */
+  listMembersByIds(ids: string[]): Promise<UserDoc[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return User.find({ _id: { $in: ids } }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members holding any of the given membership statuses. */
+  listMembersByStatus(statuses: string[]): Promise<UserDoc[]> {
+    return User.find({
+      role: ROLES.MEMBER,
+      "gym_meta.membership_status": { $in: statuses },
+    }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members whose account is deactivated. */
+  listSuspendedMembers(): Promise<UserDoc[]> {
+    return User.find({ role: ROLES.MEMBER, is_active: false }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members who joined on or after the given calendar date. */
+  async listMembersJoinedSince(dateStr: string): Promise<UserDoc[]> {
+    // Same mixed-type problem as the count; see countMembersJoinedSince.
+    const rows = await User.collection
+      .find({
+        role: ROLES.MEMBER,
+        $or: [
+          { "gym_meta.joined_on": { $gte: dateStr, $type: "string" } },
+          { "gym_meta.joined_on": { $gte: new Date(`${dateStr}T00:00:00.000Z`), $type: "date" } },
+        ],
+      }, { projection: { _id: 1 } })
+      .toArray();
+    return this.listMembersByIds(rows.map((row) => String(row._id)));
+  },
+
   /** Ids of every member, for set arithmetic against subscription holders. */
   async listMemberIds(): Promise<string[]> {
     const ids = await User.distinct("_id", { role: ROLES.MEMBER }).exec();

@@ -2,6 +2,7 @@
 import type { Request, Response } from "express";
 
 import { asyncHandler } from "../middleware/index.js";
+import { MEMBER_COHORTS, type MemberCohort } from "../dtos/dashboard.dto.js";
 import { analyticsService, dashboardService } from "../services/index.js";
 import { success } from "../utils/apiResponse.js";
 
@@ -19,6 +20,16 @@ export const dashboardController = {
    */
   getAnalytics: asyncHandler(async (_req: Request, res: Response) => {
     res.json(success(await analyticsService.getAnalytics()));
+  }),
+
+  /**
+   * GET /dashboard/analytics/members/:cohort — the members behind one figure.
+   *
+   * Owner only, like the analytics it drills into.
+   */
+  getMemberCohort: asyncHandler(async (req: Request, res: Response) => {
+    const cohort = req.params["cohort"] as MemberCohort;
+    res.json(success(await analyticsService.getMemberCohort(cohort)));
   }),
 
   /** GET /dashboard/trainer — today's floor view. Trainer or owner. */

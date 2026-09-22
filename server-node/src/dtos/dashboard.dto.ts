@@ -89,3 +89,14 @@ export interface AnalyticsResponse {
   members: MemberAnalytics;
   plans: PlanAnalytics;
 }
+
+/** Which membership cohort to list. Mirrors the analytics rows. */
+export const MEMBER_COHORTS = [
+  "active",
+  "inactive",
+  "lapsed",
+  "never_subscribed",
+  "suspended",
+  "joined_this_month",
+] as const;
+export type MemberCohort = (typeof MEMBER_COHORTS)[number];
