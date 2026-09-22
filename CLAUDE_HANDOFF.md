@@ -1,3 +1,7 @@
+> **Superseded.** This describes the FastAPI backend, which has been ported to
+> Node/Express and is no longer the live server. See `HANDOFF.md` in the repo
+> root for the current state. Kept for historical context.
+
 # FitCore v2 Claude Code Handoff
 
 ## Project Location
