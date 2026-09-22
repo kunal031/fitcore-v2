@@ -87,12 +87,61 @@ export const userRepository = {
     return User.countDocuments({ role: ROLES.MEMBER, is_active: false }).exec();
   },
 
-  /** Members who joined on or after the given calendar date. */
+  /**
+   * Members who joined on or after the given calendar date.
+   *
+   * `joined_on` is stored two ways: this server writes a YYYY-MM-DD string,
+   * while records created by the FastAPI server hold a BSON date. MongoDB
+   * compares across BSON types by type order, so a single `$gte` matches only
+   * one of them — a string bound silently skips every date record, and the
+   * count came back near zero.
+   *
+   * The query goes through the raw driver because the schema declares this
+   * field a string, so Mongoose would cast the Date bound back to a string
+   * and reintroduce the mismatch.
+   */
   countMembersJoinedSince(dateStr: string): Promise<number> {
-    return User.countDocuments({
+    return User.collection.countDocuments({
       role: ROLES.MEMBER,
-      "gym_meta.joined_on": { $gte: dateStr },
-    }).exec();
+      $or: [
+        { "gym_meta.joined_on": { $gte: dateStr, $type: "string" } },
+        { "gym_meta.joined_on": { $gte: new Date(`${dateStr}T00:00:00.000Z`), $type: "date" } },
+      ],
+    });
+  },
+
+  /** Members by id, in list order. */
+  listMembersByIds(ids: string[]): Promise<UserDoc[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return User.find({ _id: { $in: ids } }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members holding any of the given membership statuses. */
+  listMembersByStatus(statuses: string[]): Promise<UserDoc[]> {
+    return User.find({
+      role: ROLES.MEMBER,
+      "gym_meta.membership_status": { $in: statuses },
+    }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members whose account is deactivated. */
+  listSuspendedMembers(): Promise<UserDoc[]> {
+    return User.find({ role: ROLES.MEMBER, is_active: false }).sort({ full_name: 1 }).exec();
+  },
+
+  /** Members who joined on or after the given calendar date. */
+  async listMembersJoinedSince(dateStr: string): Promise<UserDoc[]> {
+    // Same mixed-type problem as the count; see countMembersJoinedSince.
+    const rows = await User.collection
+      .find({
+        role: ROLES.MEMBER,
+        $or: [
+          { "gym_meta.joined_on": { $gte: dateStr, $type: "string" } },
+          { "gym_meta.joined_on": { $gte: new Date(`${dateStr}T00:00:00.000Z`), $type: "date" } },
+        ],
+      }, { projection: { _id: 1 } })
+      .toArray();
+    return this.listMembersByIds(rows.map((row) => String(row._id)));
   },
 
   /** Ids of every member, for set arithmetic against subscription holders. */

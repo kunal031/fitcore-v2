@@ -36,8 +36,15 @@ import {
 	type MemberListItem,
 	type TrainerListItem,
 } from "../../services/userService";
-import { getSubscriptionById, type Subscription } from "../../services/subscriptionService";
-import { getAnalytics, type Analytics, type PlanBreakdownItem } from "../../services/analyticsService";
+import { getActiveSubscriptionForMember, type Subscription } from "../../services/subscriptionService";
+import {
+	getAnalytics,
+	getMemberCohort,
+	type Analytics,
+	type CohortMember,
+	type MemberCohort,
+	type PlanBreakdownItem,
+} from "../../services/analyticsService";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
 import type { AuthUser, MemberProfile } from "../../store/authStore";
@@ -46,7 +53,7 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-const STAFF_TABS = ["members", "record", "plans", "coupons", "analytics", "catalogue", "profile"] as const;
+const STAFF_TABS = ["analytics", "members", "attendance", "plans", "coupons", "catalogue", "profile"] as const;
 type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
@@ -67,8 +74,9 @@ export default function StaffWorkspace({
 }) {
 	const isAdmin = user.role === "owner";
 	// Trainers land on attendance — the thing they do all day.
-	// Admins land on Members; the logo returns here.
-	const homeTab: StaffTab = "members";
+	// Admins land on Analytics and the logo returns there; trainers have no
+	// analytics tab, so they land on their member list.
+	const homeTab: StaffTab = isAdmin ? "analytics" : "members";
 	// URL-backed, so a staff view can be linked to and the back button works.
 	// Set while a member profile is open on the Members tab.
 	const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -82,11 +90,11 @@ export default function StaffWorkspace({
 		() =>
 			(isAdmin
 				? ([
+						["analytics", ChartBar, "Analytics"],
 						["members", Users, "Members"],
-						["record", CalendarCheck, "Record"],
+						["attendance", CalendarCheck, "Attendance"],
 						["plans", LayoutGrid, "Plans"],
 						["coupons", BadgePercent, "Coupons"],
-						["analytics", ChartBar, "Analytics"],
 				  ] as const)
 				: // Trainers: mark attendance, look up what is on sale, manage their
 				  // own profile. Plan and coupon editing stays with the Admin.
@@ -135,7 +143,7 @@ export default function StaffWorkspace({
 							? <MemberDetail memberId={selectedMemberId} onBack={() => setSelectedMemberId(null)} />
 							: <MemberDirectory onOpenMember={setSelectedMemberId} />
 					)}
-					{tab === "record" && <AttendanceRecorder />}
+					{tab === "attendance" && <AttendanceRecorder isAdmin={isAdmin} />}
 					{tab === "analytics" && isAdmin && <AnalyticsView />}
 					{tab === "catalogue" && <CatalogueView />}
 					{tab === "profile" && <StaffProfileView user={user} />}
@@ -999,10 +1007,6 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Directory</p><h2>{showingTrainers ? "Trainers" : "Gym users"}</h2></div>
-			</div>
-
 			<nav className="section-jump" aria-label="Choose directory">
 				<button
 					className={showingTrainers ? "jump-pill" : "jump-pill active"}
@@ -1055,11 +1059,25 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 					<div className="table-wrap">
 						<table className="data-table">
 							<thead>
-								<tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
+								<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
 							</thead>
 							<tbody>
 								{visibleTrainers.map((trainer) => (
-									<tr key={trainer.id}>
+									<tr
+										key={trainer.id}
+										className="row-clickable"
+										onClick={() => onOpenMember(trainer.id)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" || event.key === " ") {
+												event.preventDefault();
+												onOpenMember(trainer.id);
+											}
+										}}
+										tabIndex={0}
+										role="button"
+										aria-label={`Open ${trainer.full_name}`}
+									>
+										<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
 										<td data-label="Name"><strong>{trainer.full_name}</strong></td>
 										<td data-label="Phone">{trainer.phone}</td>
 										<td data-label="Email">{trainer.email ?? "—"}</td>
@@ -1080,23 +1098,33 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 				<div className="table-wrap">
 					<table className="data-table">
 						<thead>
-							<tr><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
+							<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
 						</thead>
 						<tbody>
 							{members.map((member) => {
 								const done = checkedInIds.has(member.id);
 								return (
-									<tr key={member.id}>
-										<td data-label="Name">
-											{/* Opens the profile; the row itself stays a table row so the
-											    columns line up. */}
-											<button className="link-button" onClick={() => onOpenMember(member.id)}>
-												{member.full_name}
-											</button>
-										</td>
+									// The row opens the profile; the attendance cell stops the
+									// click so marking present never navigates away.
+									<tr
+										key={member.id}
+										className="row-clickable"
+										onClick={() => onOpenMember(member.id)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" || event.key === " ") {
+												event.preventDefault();
+												onOpenMember(member.id);
+											}
+										}}
+										tabIndex={0}
+										role="button"
+										aria-label={`Open ${member.full_name}`}
+									>
+										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+										<td data-label="Name"><strong>{member.full_name}</strong></td>
 										<td data-label="Phone">{member.phone}</td>
 										<td data-label="Email">{member.email ?? "—"}</td>
-										<td data-label="Attendance">
+										<td data-label="Attendance" onClick={(event) => event.stopPropagation()}>
 											{done ? (
 												<span className="status-dot">Present today</span>
 											) : (
@@ -1144,9 +1172,10 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 			// allSettled: a member with no plan should still show their profile.
 			const [log, sub] = await Promise.allSettled([
 				getMemberAttendance(memberId),
-				profile.active_subscription_id
-					? getSubscriptionById(profile.active_subscription_id)
-					: Promise.resolve(null),
+				// Looked up by member rather than by the profile's cached
+				// active_subscription_id, which can drift out of step with the
+				// subscription's real status.
+				getActiveSubscriptionForMember(memberId),
 			]);
 			if (log.status === "fulfilled") setAttendance(log.value);
 			if (sub.status === "fulfilled") setSubscription(sub.value);
@@ -1162,6 +1191,8 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 
 	const todayKey = new Date().toISOString().slice(0, 10);
 	const presentToday = attendance.some((entry) => entry.date === todayKey);
+	// Staff have no plan, so check-in and plan facts do not apply to them.
+	const isStaff = member?.role === "trainer" || member?.role === "owner";
 
 	async function mark() {
 		setMarking(true); setError(""); setNotice("");
@@ -1193,22 +1224,30 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 						{member.gym_meta?.membership_status ?? "inactive"}
 					</span>
 				</div>
-				<button className="primary-action compact-button" onClick={mark} disabled={marking || presentToday}>
-					{marking ? "Marking..." : presentToday ? "Present today" : "Mark attendance"}
-				</button>
+				{/* The backend refuses check-in for staff (NO_ACTIVE_SUBSCRIPTION),
+				    so offering the button here would be a control that always fails. */}
+				{isStaff ? (
+					<span className="role-chip">{member.role === "owner" ? "Admin" : "Trainer"}</span>
+				) : (
+					<button className="primary-action compact-button" onClick={mark} disabled={marking || presentToday}>
+						{marking ? "Marking..." : presentToday ? "Present today" : "Mark attendance"}
+					</button>
+				)}
 			</div>
 
 			{notice && <div className="profile-message">{notice}</div>}
 			{error && <div className="error-message">{error}</div>}
 
-			<div className="insight-grid">
-				<article className="insight-card accent-card">
-					<CalendarCheck size={19} /><strong>{attendance.length}</strong><span>total visits</span>
-				</article>
-				<article className="insight-card">
-					<Clock size={19} /><strong>{subscription?.days_remaining ?? 0}</strong><span>visits left</span>
-				</article>
-			</div>
+			{!isStaff && (
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<CalendarCheck size={19} /><strong>{attendance.length}</strong><span>total visits</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} /><strong>{subscription?.days_remaining ?? 0}</strong><span>visits left</span>
+					</article>
+				</div>
+			)}
 
 			<div className="section-heading"><h2>Details</h2></div>
 			<div className="detail-list">
@@ -1217,26 +1256,15 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
 				<Detail label="Joined" value={dateLabel(member.gym_meta?.joined_on)} />
 				<Detail label="Blood group" value={member.profile?.blood_group ?? "Not added"} />
 				<Detail label="Address" value={[member.profile?.address?.city, member.profile?.address?.state].filter(Boolean).join(", ") || "Not added"} />
-				<Detail label="Current plan" value={subscription?.plan_snapshot.plan_name ?? "No active plan"} />
-				{subscription && <Detail label="Expires" value={dateLabel(subscription.expires_on)} />}
+				{!isStaff && <Detail label="Current plan" value={subscription?.plan_snapshot.plan_name ?? "No active plan"} />}
+				{!isStaff && subscription && <Detail label="Expires" value={dateLabel(subscription.expires_on)} />}
+				<Detail label="Record ID" value={shortId(memberId)} />
 			</div>
 
-			<div className="section-heading">
-				<h2>Attendance</h2>
-				<span className="muted">{attendance.length} visits</span>
-			</div>
-			{attendance.length === 0 ? (
-				<div className="empty-state">No visits recorded yet.</div>
-			) : (
-				<div className="history-list">
-					{attendance.slice(0, 20).map((entry) => (
-						<article className="history-row" key={`${entry.date}-${entry.check_in_time}`}>
-							<div>
-								<strong>{dateLabel(entry.date)}</strong>
-								<span>{new Date(entry.check_in_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-							</div>
-						</article>
-					))}
+			{!isStaff && (
+				<div className="member-split">
+					<MemberAttendanceCalendar attendance={attendance} />
+					<MemberPlanPanel subscription={subscription} attendanceCount={attendance.length} />
 				</div>
 			)}
 		</section>
@@ -1250,8 +1278,28 @@ function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => vo
  * the list. The member profile has the same action for when staff are already
  * looking at that person.
  */
-function AttendanceRecorder() {
+/**
+ * Short, stable identifier shown in the directory and attendance tables.
+ *
+ * Mongo ids are 24 hex characters — unreadable in a table. The last six are
+ * enough to tell apart two members who share a name, which is the job, and
+ * they stay stable for the life of the record.
+ */
+function shortId(id: string) {
+	return id.slice(-6).toUpperCase();
+}
+
+/**
+ * Attendance: mark gym users present, and see which trainers are on today.
+ *
+ * Trainers are read-only here. Member check-in deducts a day from a plan
+ * quota, and staff have no plan, so the backend refuses it — offering the
+ * button would be a control that always fails.
+ */
+function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
+	const [audience, setAudience] = useState<"members" | "trainers">("members");
 	const [members, setMembers] = useState<MemberListItem[]>([]);
+	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
 	const [today, setToday] = useState<TodayCheckIn[]>([]);
 	const [summary, setSummary] = useState<TrainerDashboard | null>(null);
 	const [search, setSearch] = useState("");
@@ -1262,17 +1310,20 @@ function AttendanceRecorder() {
 
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
-		const [memberResult, todayResult, summaryResult] = await Promise.allSettled([
+		const [memberResult, todayResult, summaryResult, trainerResult] = await Promise.allSettled([
 			listMembers({ search: term, role: "member", limit: 100 }),
 			getTodayCheckIns(),
 			getTrainerDashboard(),
+			// Only admins may list trainers; a trainer's own call would 403.
+			isAdmin ? listTrainers() : Promise.resolve([] as TrainerListItem[]),
 		]);
 		if (memberResult.status === "fulfilled") { setMembers(memberResult.value.items); setError(""); }
 		else setError(apiErrorMessage(memberResult.reason));
 		if (todayResult.status === "fulfilled") setToday(todayResult.value);
 		if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
+		if (trainerResult.status === "fulfilled") setTrainers(trainerResult.value);
 		setLoading(false);
-	}, []);
+	}, [isAdmin]);
 
 	useEffect(() => { void load(""); }, [load]);
 	useEffect(() => {
@@ -1281,6 +1332,15 @@ function AttendanceRecorder() {
 	}, [search, load]);
 
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+	const showingTrainers = audience === "trainers";
+
+	const visibleTrainers = useMemo(() => {
+		const term = search.trim().toLowerCase();
+		if (!term) return trainers;
+		return trainers.filter(
+			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
+		);
+	}, [trainers, search]);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1294,6 +1354,7 @@ function AttendanceRecorder() {
 			if (refreshedToday.status === "fulfilled") setToday(refreshedToday.value);
 			if (refreshedSummary.status === "fulfilled") setSummary(refreshedSummary.value);
 		} catch (requestError) {
+			// Covers no active plan, expired plan and exhausted quota.
 			setError(apiErrorMessage(requestError));
 		} finally {
 			setMarkingId(null);
@@ -1302,12 +1363,26 @@ function AttendanceRecorder() {
 
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Record</p><h2>Mark attendance</h2></div>
-				<span className="muted">{today.length} checked in today</span>
-			</div>
+			{isAdmin && (
+				<nav className="section-jump" aria-label="Choose who to record">
+					<button
+						className={showingTrainers ? "jump-pill" : "jump-pill active"}
+						aria-current={showingTrainers ? undefined : "true"}
+						onClick={() => setAudience("members")}
+					>
+						Gym users
+					</button>
+					<button
+						className={showingTrainers ? "jump-pill active" : "jump-pill"}
+						aria-current={showingTrainers ? "true" : undefined}
+						onClick={() => setAudience("trainers")}
+					>
+						Trainers
+					</button>
+				</nav>
+			)}
 
-			{summary && (
+			{summary && !showingTrainers && (
 				<div className="insight-grid">
 					<article className="insight-card accent-card">
 						<CalendarCheck size={19} /><strong>{summary.checkins_today}</strong><span>checked in today</span>
@@ -1320,36 +1395,81 @@ function AttendanceRecorder() {
 
 			<div className="search-row">
 				<Search size={16} />
-				<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone" aria-label="Search members" />
+				<input
+					value={search}
+					onChange={(e) => setSearch(e.target.value)}
+					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+					aria-label="Search"
+				/>
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
 
 			{loading ? (
-				<div className="loading-state">Loading members...</div>
+				<div className="loading-state">Loading...</div>
+			) : showingTrainers ? (
+				visibleTrainers.length === 0 ? (
+					<div className="empty-state">No trainers matched your search.</div>
+				) : (
+					<>
+						<div className="table-wrap">
+							<table className="data-table">
+								<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
+								<tbody>
+									{visibleTrainers.map((trainer) => (
+										<tr key={trainer.id}>
+											<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
+											<td data-label="Name"><strong>{trainer.full_name}</strong></td>
+											<td data-label="Email">{trainer.email ?? "—"}</td>
+											<td data-label="Status">
+												<span className={trainer.is_active ? "status-dot" : "muted"}>
+													{trainer.is_active ? "Active" : "Inactive"}
+												</span>
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						<p className="muted catalogue-note">
+							Trainer shifts are not tracked as gym attendance — check-in draws down a
+							member plan, which staff accounts do not have.
+						</p>
+					</>
+				)
 			) : members.length === 0 ? (
-				<div className="empty-state">No members matched your search.</div>
+				<div className="empty-state">No gym users matched your search.</div>
 			) : (
-				<div className="history-list">
-					{members.map((member) => {
-						const done = checkedInIds.has(member.id);
-						return (
-							<article className="history-row" key={member.id}>
-								<div>
-									<strong>{member.full_name}</strong>
-									<span>{member.phone} · {member.gym_meta.membership_status}</span>
-								</div>
-								{done ? (
-									<span className="status-dot">Present today</span>
-								) : (
-									<button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
-										{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
-									</button>
-								)}
-							</article>
-						);
-					})}
+				<div className="table-wrap">
+					<table className="data-table">
+						<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Attendance</th></tr></thead>
+						<tbody>
+							{members.map((member) => {
+								const done = checkedInIds.has(member.id);
+								return (
+									<tr key={member.id}>
+										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+										<td data-label="Name"><strong>{member.full_name}</strong></td>
+										<td data-label="Email">{member.email ?? "—"}</td>
+										<td data-label="Attendance">
+											{done ? (
+												<span className="status-dot">Present today</span>
+											) : (
+												<button
+													className="outline-button compact-button"
+													onClick={() => mark(member)}
+													disabled={markingId === member.id}
+												>
+													{markingId === member.id ? "Marking..." : "Mark attendance"}
+												</button>
+											)}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
 				</div>
 			)}
 		</section>
@@ -1440,6 +1560,8 @@ function AnalyticsView() {
 	const [data, setData] = useState<Analytics | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+	// Which figure's members are open below the list, if any.
+	const [cohort, setCohort] = useState<MemberCohort | null>(null);
 
 	const sections = useMemo(
 		() => [
@@ -1472,27 +1594,30 @@ function AnalyticsView() {
 			<div id="member-analytics" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Analytics</p><h2>Membership</h2></div>
-					<span className="muted">{members.total_registered} registered</span>
 				</div>
 
 				<div className="insight-grid">
 					<article className="insight-card accent-card">
 						<Users size={19} /><strong>{members.total_registered}</strong><span>total registered</span>
 					</article>
-					<article className="insight-card">
+					<button className="insight-card insight-card-button" onClick={() => setCohort("active")}>
 						<CalendarCheck size={19} /><strong>{members.active}</strong><span>active members</span>
-					</article>
-					<article className="insight-card">
+					</button>
+					<button className="insight-card insight-card-button" onClick={() => setCohort("inactive")}>
 						<Clock size={19} /><strong>{members.inactive}</strong><span>inactive</span>
-					</article>
+					</button>
 				</div>
 
+				{/* Each row opens the members it counts, so a figure can be acted
+				    on rather than only read. */}
 				<div className="detail-list">
-					<Detail label="Lapsed — bought before, not renewed" value={String(members.lapsed)} />
-					<Detail label="Never bought a plan" value={String(members.never_subscribed)} />
-					<Detail label="Suspended accounts" value={String(members.suspended)} />
-					<Detail label="Joined this month" value={String(members.joined_this_month)} />
+					<CohortRow label="Lapsed — bought before, not renewed" count={members.lapsed} cohort="lapsed" onOpen={setCohort} active={cohort === "lapsed"} />
+					<CohortRow label="Never bought a plan" count={members.never_subscribed} cohort="never_subscribed" onOpen={setCohort} active={cohort === "never_subscribed"} />
+					<CohortRow label="Suspended accounts" count={members.suspended} cohort="suspended" onOpen={setCohort} active={cohort === "suspended"} />
+					<CohortRow label="Joined this month" count={members.joined_this_month} cohort="joined_this_month" onOpen={setCohort} active={cohort === "joined_this_month"} />
 				</div>
+
+				{cohort && <CohortTable cohort={cohort} onClose={() => setCohort(null)} />}
 
 				{members.lapsed > 0 && (
 					<p className="muted analytics-note">
@@ -1506,7 +1631,6 @@ function AnalyticsView() {
 			<div id="plan-analytics" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Analytics</p><h2>Plans</h2></div>
-					<span className="muted">{plans.total_plans} in catalogue</span>
 				</div>
 
 				<div className="insight-grid">
@@ -1549,11 +1673,16 @@ function AnalyticsView() {
 function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 	// Plans nobody is on would render as a row of empty labels.
 	const rows = breakdown.filter((item) => item.active_members > 0 || item.total_sold > 0);
-	// Scale to a rounded ceiling rather than the largest value, so the leader
-	// does not always fill the track. Without this, several plans tied at the
-	// top all read as 100% and the chart says nothing about scale.
 	const peak = Math.max(1, ...rows.map((item) => item.active_members));
-	const max = peak <= 5 ? peak + 1 : Math.ceil(peak * 1.15);
+
+	// A rounded axis maximum with whole-number ticks, so the bars are read
+	// against a scale rather than against each other. Without it, several
+	// plans tied at the top all fill the track and the chart says nothing.
+	const axisMax = peak <= 4 ? peak + 1 : Math.ceil((peak * 1.1) / 2) * 2;
+	const tickCount = Math.min(axisMax, 5);
+	const ticks = Array.from({ length: tickCount + 1 }, (_, i) =>
+		Math.round((axisMax / tickCount) * i),
+	).filter((value, index, all) => all.indexOf(value) === index);
 
 	if (rows.length === 0) {
 		return (
@@ -1566,40 +1695,71 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 
 	return (
 		<>
-			<div className="section-heading">
-				<h3>Members per plan</h3>
-				<span className="muted">current members</span>
-			</div>
+			<div className="section-heading"><h3>Members per plan</h3></div>
 
 			<div className="chart-panel">
-				{rows.map((item) => {
-					const percent = (item.active_members / max) * 100;
-					return (
-						<div className="chart-row" key={item.plan_id}>
-							<span className="chart-label" title={item.plan_name}>
-								{item.plan_name}
-								{!item.is_active && <em className="chart-archived"> archived</em>}
+				<div className="chart-plot">
+					{/* Hairline grid, one step off the surface — recessive, so the
+					    bars stay the loudest thing in the panel. */}
+					<div className="chart-grid" aria-hidden="true">
+						<span />
+						<span className="chart-grid-track">
+							<span className="chart-grid-inner">
+								{ticks.map((tick) => (
+									<span
+										className="chart-gridline"
+										key={tick}
+										style={{ left: `${(tick / axisMax) * 100}%` }}
+									/>
+								))}
 							</span>
-							<span className="chart-track">
+						</span>
+					</div>
+
+					<div className="chart-rows">
+						{rows.map((item) => (
+							<div className="chart-row" key={item.plan_id}>
+								<span className="chart-label" title={item.plan_name}>
+									{item.plan_name}
+									{!item.is_active && <em className="chart-archived"> archived</em>}
+								</span>
+								<span className="chart-track">
+									{/* Thin mark rather than a thick saturated block, with the
+									    value sitting just past the end instead of inside it. */}
+									<span
+										className="chart-bar"
+										style={{ width: `${(item.active_members / axisMax) * 100}%` }}
+									/>
+									<span className="chart-mark-value">{item.active_members}</span>
+								</span>
+							</div>
+						))}
+					</div>
+				</div>
+
+				{/* Axis band, inside the panel so it is never cropped out. */}
+				<div className="chart-axis" aria-hidden="true">
+					<span className="chart-label" />
+					<span className="chart-axis-track">
+						{/* Inner element matches the bar track's measured width, so a
+						    tick sits exactly under the value it marks. */}
+						<span className="chart-axis-inner">
+							{ticks.map((tick) => (
 								<span
-									className="chart-bar"
-									style={{
-										width: `${Math.max(percent, item.active_members > 0 ? 3 : 0)}%`,
-										// One hue, deeper with magnitude: sequential, not categorical.
-										opacity: 0.5 + (item.active_members / peak) * 0.5,
-									}}
-								/>
-							</span>
-							<span className="chart-value">
-								<strong>{item.active_members}</strong>
-								<small>{item.total_sold} sold</small>
-							</span>
-						</div>
-					);
-				})}
+									className="chart-tick"
+									key={tick}
+									style={{ left: `${(tick / axisMax) * 100}%` }}
+								>
+									{tick}
+								</span>
+							))}
+						</span>
+					</span>
+				</div>
+				<p className="chart-axis-caption">members currently on each plan</p>
 			</div>
 
-			{/* A table view, so the figures are readable without relying on the bars. */}
+			{/* A table view, so the figures are readable without the bars. */}
 			<details className="chart-table">
 				<summary>View as table</summary>
 				<div className="detail-list">
@@ -1615,3 +1775,259 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 		</>
 	);
 }
+/* ── Admin: member attendance calendar ───────────────────────────────────── */
+
+const MONTH_WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/** Local YYYY-MM-DD, so "today" matches the viewer's calendar rather than UTC. */
+function localDayKey(date: Date) {
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * A member's visits as a month grid.
+ *
+ * Replaces the day-by-day list, which grew unreadable past a few weeks and
+ * made patterns — a gap, a streak — impossible to see. Opens on the current
+ * month; the arrows step back through history.
+ */
+function MemberAttendanceCalendar({ attendance }: { attendance: AttendanceRecord[] }) {
+	const today = new Date();
+	const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+
+	const attendedDays = useMemo(
+		() => new Set(attendance.map((entry) => entry.date)),
+		[attendance],
+	);
+
+	const year = cursor.getFullYear();
+	const month = cursor.getMonth();
+
+	const cells = useMemo(() => {
+		const firstWeekday = new Date(year, month, 1).getDay();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		// Leading blanks so the 1st lands under its weekday column.
+		return [
+			...Array.from({ length: firstWeekday }, () => null),
+			...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
+		];
+	}, [year, month]);
+
+	const monthLabel = cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+	const visitsThisMonth = cells.filter((date) => date && attendedDays.has(localDayKey(date))).length;
+	const atCurrentMonth = year === today.getFullYear() && month === today.getMonth();
+
+	return (
+		<article className="panel calendar-panel">
+			<div className="panel-head">
+				<p className="eyebrow">Attendance</p>
+				<div className="calendar-nav">
+					<button
+						className="icon-button compact-icon"
+						onClick={() => setCursor(new Date(year, month - 1, 1))}
+						aria-label="Previous month"
+					>
+						<ChevronLeft size={16} />
+					</button>
+					<button
+						className="icon-button compact-icon"
+						onClick={() => setCursor(new Date(year, month + 1, 1))}
+						disabled={atCurrentMonth}
+						aria-label="Next month"
+					>
+						<ChevronRight size={16} />
+					</button>
+				</div>
+			</div>
+
+			<h3 className="calendar-month">{monthLabel}</h3>
+
+			<div className="calendar-grid" role="grid" aria-label={`Attendance for ${monthLabel}`}>
+				{MONTH_WEEKDAYS.map((initial, index) => (
+					<span className="calendar-weekday" key={`${initial}-${index}`} aria-hidden="true">{initial}</span>
+				))}
+				{cells.map((date, index) => {
+					if (!date) return <span className="calendar-cell empty" key={`blank-${index}`} />;
+					const key = localDayKey(date);
+					const attended = attendedDays.has(key);
+					const isToday = key === localDayKey(today);
+					const isFuture = date > today;
+					return (
+						<span
+							key={key}
+							className={`calendar-cell${attended ? " attended" : ""}${isToday ? " is-today" : ""}${isFuture ? " future" : ""}`}
+							title={attended ? `Visited on ${date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : undefined}
+						>
+							{date.getDate()}
+						</span>
+					);
+				})}
+			</div>
+
+			<p className="muted calendar-summary">
+				<span className="calendar-key" aria-hidden="true" /> {visitsThisMonth} {visitsThisMonth === 1 ? "visit" : "visits"} this month
+			</p>
+		</article>
+	);
+}
+
+/* ── Admin: member's current plan ────────────────────────────────────────── */
+
+/**
+ * The member's active plan, alongside the calendar.
+ *
+ * Shows what they bought and how much of it is left — the two questions an
+ * admin looking at a member is usually answering.
+ */
+function MemberPlanPanel({ subscription, attendanceCount }: { subscription: Subscription | null; attendanceCount: number }) {
+	if (!subscription) {
+		return (
+			<article className="panel plan-panel">
+				<div className="panel-head"><p className="eyebrow">Current plan</p></div>
+				<div className="panel-empty">
+					<p>No active plan.</p>
+					<small className="muted">{attendanceCount} lifetime {attendanceCount === 1 ? "visit" : "visits"} recorded.</small>
+				</div>
+			</article>
+		);
+	}
+
+	const usedPercent = Math.min(
+		100,
+		Math.round((subscription.days_used / subscription.allocated_days) * 100),
+	);
+
+	return (
+		<article className="panel plan-panel">
+			<div className="panel-head">
+				<p className="eyebrow">Current plan</p>
+				<span className="status-dot">{subscription.status}</span>
+			</div>
+
+			<div className="plan-panel-ring">
+				<div
+					className="progress-ring"
+					style={{ "--progress": `${usedPercent * 3.6}deg` } as React.CSSProperties}
+				>
+					<span>{subscription.days_remaining}<small>left</small></span>
+				</div>
+				<div className="plan-panel-head">
+					<h2 className="plan-panel-name">{subscription.plan_snapshot.plan_name}</h2>
+					<p className="muted">{subscription.plan_snapshot.calendar_days} days · {subscription.allocated_days} visits</p>
+					<strong className="plan-panel-price">{money(subscription.plan_snapshot.price_paise)}</strong>
+				</div>
+			</div>
+
+			<div className="plan-progress">
+				<div className="plan-progress-track">
+					<div className="plan-progress-fill" style={{ width: `${usedPercent}%` }} />
+				</div>
+				<div className="plan-progress-labels">
+					<span>{subscription.days_used} of {subscription.allocated_days} visits used</span>
+					<span>{usedPercent}%</span>
+				</div>
+			</div>
+
+			<dl className="plan-facts">
+				<div><dt>Started</dt><dd>{dateLabel(subscription.starts_on)}</dd></div>
+				<div><dt>Expires</dt><dd>{dateLabel(subscription.expires_on)}</dd></div>
+				<div><dt>Days to renew</dt><dd>{subscription.days_until_expiry}</dd></div>
+			</dl>
+		</article>
+	);
+}
+
+/* ── Admin: analytics drill-down ─────────────────────────────────────────── */
+
+/**
+ * One analytics figure, clickable to reveal the members it counts.
+ *
+ * A zero row stays clickable and opens an empty state. Making it inert
+ * instead left no way to tell "nobody is in this group" from "this row is
+ * broken", and an inconsistently interactive list is harder to scan.
+ */
+function CohortRow({ label, count, cohort, onOpen, active }: { label: string; count: number; cohort: MemberCohort; onOpen: (c: MemberCohort | null) => void; active: boolean }) {
+	return (
+		<button
+			className={active ? "detail-row cohort-row open" : "detail-row cohort-row"}
+			onClick={() => onOpen(active ? null : cohort)}
+			aria-expanded={active}
+		>
+			<span>{label}</span>
+			<span className="cohort-row-right">
+				<strong>{count}</strong>
+				<ChevronRight size={15} className={active ? "cohort-chevron open" : "cohort-chevron"} />
+			</span>
+		</button>
+	);
+}
+
+/** The members behind a figure, loaded when the row is opened. */
+function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () => void }) {
+	const [members, setMembers] = useState<CohortMember[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		getMemberCohort(cohort)
+			.then((result) => { if (!cancelled) { setMembers(result); setError(""); } })
+			.catch((requestError) => { if (!cancelled) setError(apiErrorMessage(requestError)); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, [cohort]);
+
+	return (
+		<div className="cohort-panel">
+			<div className="cohort-panel-head">
+				<strong>{COHORT_LABELS[cohort]}</strong>
+				<button className="text-button" onClick={onClose}>Close</button>
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{loading ? (
+				<div className="loading-state">Loading members...</div>
+			) : members.length === 0 ? (
+				<div className="empty-state">{COHORT_EMPTY[cohort]}</div>
+			) : (
+				<div className="table-wrap">
+					<table className="data-table">
+						<thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Joined</th></tr></thead>
+						<tbody>
+							{members.map((member) => (
+								<tr key={member.id}>
+									<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+									<td data-label="Name"><strong>{member.full_name}</strong></td>
+									<td data-label="Phone">{member.phone}</td>
+									<td data-label="Email">{member.email ?? "—"}</td>
+									<td data-label="Joined">{dateLabel(member.gym_meta.joined_on)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
+		</div>
+	);
+}
+
+/** Why a group is empty, which is more useful than "no members". */
+const COHORT_EMPTY: Record<MemberCohort, string> = {
+	active: "No members have an active plan right now.",
+	inactive: "No members are inactive — everyone holds a live plan.",
+	lapsed: "Nobody has let a plan expire without renewing.",
+	never_subscribed: "Every member has bought at least one plan.",
+	suspended: "No accounts are suspended.",
+	joined_this_month: "No members joined this month.",
+};
+
+const COHORT_LABELS: Record<MemberCohort, string> = {
+	active: "Active members",
+	inactive: "Inactive members",
+	lapsed: "Lapsed — bought before, not renewed",
+	never_subscribed: "Never bought a plan",
+	suspended: "Suspended accounts",
+	joined_this_month: "Joined this month",
+};

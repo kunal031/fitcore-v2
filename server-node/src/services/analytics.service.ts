@@ -9,9 +9,12 @@ import { MEMBERSHIP_STATUS, SUBSCRIPTION_STATUS } from "../config/constants.js";
 import type {
   AnalyticsResponse,
   MemberAnalytics,
+  MemberCohort,
   PlanAnalytics,
   PlanBreakdownItem,
 } from "../dtos/dashboard.dto.js";
+import type { UserRead } from "../dtos/user.dto.js";
+import { toUserRead } from "./mappers/index.js";
 import {
   paymentRepository,
   planRepository,
@@ -95,6 +98,52 @@ export const analyticsService = {
       suspended,
       joined_this_month: joinedThisMonth,
     };
+  },
+
+  /**
+   * The members behind one analytics figure.
+   *
+   * Each cohort is derived the same way the count is, so a row and its list
+   * can never disagree — the alternative, re-deriving membership here, is how
+   * a drill-down starts showing a different number from the row that opened
+   * it.
+   */
+  async getMemberCohort(cohort: MemberCohort): Promise<UserRead[]> {
+    if (cohort === "suspended") {
+      const users = await userRepository.listSuspendedMembers();
+      return users.map(toUserRead);
+    }
+
+    if (cohort === "joined_this_month") {
+      const users = await userRepository.listMembersJoinedSince(startOfMonthStr());
+      return users.map(toUserRead);
+    }
+
+    if (cohort === "active" || cohort === "inactive") {
+      const status =
+        cohort === "active" ? [MEMBERSHIP_STATUS.ACTIVE] : [MEMBERSHIP_STATUS.INACTIVE, MEMBERSHIP_STATUS.EXPIRED];
+      const users = await userRepository.listMembersByStatus(status);
+      return users.map(toUserRead);
+    }
+
+    // lapsed / never_subscribed: the same set arithmetic the counts use.
+    const [memberIds, everSubscribed, currentlyHolding] = await Promise.all([
+      userRepository.listMemberIds(),
+      subscriptionRepository.listUserIdsWithAnySubscription(),
+      subscriptionRepository.listUserIdsByStatus([
+        SUBSCRIPTION_STATUS.ACTIVE,
+        SUBSCRIPTION_STATUS.PAUSED,
+      ]),
+    ]);
+
+    const wanted = memberIds.filter((id) =>
+      cohort === "never_subscribed"
+        ? !everSubscribed.has(id)
+        : everSubscribed.has(id) && !currentlyHolding.has(id),
+    );
+
+    const users = await userRepository.listMembersByIds(wanted);
+    return users.map(toUserRead);
   },
 
   /**

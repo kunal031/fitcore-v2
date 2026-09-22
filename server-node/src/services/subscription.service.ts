@@ -121,6 +121,33 @@ export const subscriptionService = {
     return toSubscriptionRead(subscription);
   },
 
+  /**
+   * A member's current subscription, looked up for staff.
+   *
+   * Queries subscriptions directly rather than following the user's
+   * `active_subscription_id`. That field is a cached pointer and can drift
+   * out of step with reality; the subscription's own status is the source of
+   * truth, and it is what check-in already trusts.
+   */
+  async getActiveForMember(memberId: string): Promise<SubscriptionRead | null> {
+    const active = await this.getActiveSubscription(memberId);
+
+    // Repair a drifted pointer while we are here. Cancel clears it, and before
+    // resume was fixed it was never restored, leaving members with a live plan
+    // their own profile could not find.
+    const user = await userRepository.findById(memberId);
+    if (user) {
+      const shouldPointAt = active ? active.id : null;
+      if (String(user.active_subscription_id ?? "") !== String(shouldPointAt ?? "")) {
+        user.active_subscription_id = active ? toObjectId(active.id) : null;
+        if (active) user.gym_meta.membership_status = MEMBERSHIP_STATUS.ACTIVE;
+        await user.save();
+      }
+    }
+
+    return active;
+  },
+
   /** Every subscription the member has ever held, newest first. */
   async getHistory(userId: string): Promise<SubscriptionRead[]> {
     const subscriptions = await subscriptionRepository.listByUser(userId);
@@ -222,6 +249,23 @@ export const subscriptionService = {
     subscription.status = status;
     subscription.updated_at = getUtcNow();
     await subscription.save();
+
+    // Keep the member record in step. Cancel clears the pointer, so resuming
+    // has to put it back — otherwise the user has an active subscription that
+    // nothing on their profile can find.
+    const user = await userRepository.findById(subscription.user_id);
+    if (user) {
+      if (status === SUBSCRIPTION_STATUS.ACTIVE) {
+        user.active_subscription_id = subscription._id;
+        user.gym_meta.membership_status = MEMBERSHIP_STATUS.ACTIVE;
+        await user.save();
+      } else if (String(user.active_subscription_id) === String(subscription._id)) {
+        // Paused: the member holds the plan but cannot attend on it today.
+        user.gym_meta.membership_status = MEMBERSHIP_STATUS.INACTIVE;
+        await user.save();
+      }
+    }
+
     return toSubscriptionRead(subscription);
   },
 };

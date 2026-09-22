@@ -42,3 +42,27 @@ export async function getAnalytics() {
 	const response = await api.get<{ data: Analytics }>("/dashboard/analytics");
 	return response.data.data;
 }
+
+export type MemberCohort =
+	| "active"
+	| "inactive"
+	| "lapsed"
+	| "never_subscribed"
+	| "suspended"
+	| "joined_this_month";
+
+export interface CohortMember {
+	id: string;
+	full_name: string;
+	phone: string;
+	email?: string | null;
+	gym_meta: { joined_on: string; membership_status: string };
+}
+
+/** The members counted by one analytics figure. Owner only. */
+export async function getMemberCohort(cohort: MemberCohort) {
+	const response = await api.get<{ data: CohortMember[] }>(
+		`/dashboard/analytics/members/${cohort}`,
+	);
+	return response.data.data ?? [];
+}

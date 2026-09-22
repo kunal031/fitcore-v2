@@ -41,6 +41,14 @@ subscriptionRoutes.get(
   subscriptionController.getExpiring,
 );
 
+// Literal prefix — must precede `/:subId`, or "member" is read as an id.
+subscriptionRoutes.get(
+  "/member/:memberId",
+  requireTrainerOrOwner,
+  validate({ params: idParamSchema("memberId") }),
+  subscriptionController.getActiveForMember,
+);
+
 subscriptionRoutes.get(
   "/:subId",
   requireTrainerOrOwner,
