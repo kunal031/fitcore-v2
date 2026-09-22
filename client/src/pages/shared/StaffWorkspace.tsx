@@ -31,6 +31,7 @@ import {
 	updateMyProfile,
 	type MemberListItem,
 } from "../../services/userService";
+import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
 import type { AuthUser, MemberProfile } from "../../store/authStore";
 
@@ -38,7 +39,8 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-type StaffTab = "plans" | "coupons" | "members" | "catalogue" | "profile";
+const STAFF_TABS = ["plans", "coupons", "members", "catalogue", "profile"] as const;
+type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
 const dateLabel = (value?: string | null) =>
@@ -58,7 +60,13 @@ export default function StaffWorkspace({
 }) {
 	const isAdmin = user.role === "owner";
 	// Trainers land on attendance — the thing they do all day.
-	const [tab, setTab] = useState<StaffTab>(isAdmin ? "plans" : "members");
+	const homeTab: StaffTab = isAdmin ? "plans" : "members";
+	// URL-backed, so a staff view can be linked to and the back button works.
+	const [tab, setTab] = useTabRoute<StaffTab>({
+		validTabs: STAFF_TABS,
+		fallback: homeTab,
+		basePath: "/app",
+	});
 
 	const tabs = useMemo(
 		() =>
@@ -81,11 +89,18 @@ export default function StaffWorkspace({
 	return (
 		<div className="dashboard">
 			<header className="mobile-header">
-				<div className="brand">
-					<span className="brand-mark"><Dumbbell size={17} /></span>
+				{/* Empty side balances the actions on the right so the logo sits
+				    in the true centre of the bar. */}
+				<div className="header-side" />
+				<button
+					className="brand brand-button"
+					onClick={() => setTab(homeTab)}
+					aria-label="Go to home"
+				>
+					<span className="brand-mark"><Dumbbell size={19} /></span>
 					<span className="brand-text">FITCORE</span>
-				</div>
-				<div className="header-actions">
+				</button>
+				<div className="header-actions header-side">
 					<span className="role-chip">{roleLabels[user.role]}</span>
 					<button className="icon-button" onClick={() => setDarkMode(!darkMode)} aria-label="Toggle theme">
 						{darkMode ? <Sun size={18} /> : <Moon size={18} />}
