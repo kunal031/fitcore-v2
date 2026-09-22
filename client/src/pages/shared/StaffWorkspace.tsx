@@ -1939,18 +1939,14 @@ function MemberPlanPanel({ subscription, attendanceCount }: { subscription: Subs
 
 /* ── Admin: analytics drill-down ─────────────────────────────────────────── */
 
-/** One analytics figure, clickable to reveal the members it counts. */
+/**
+ * One analytics figure, clickable to reveal the members it counts.
+ *
+ * A zero row stays clickable and opens an empty state. Making it inert
+ * instead left no way to tell "nobody is in this group" from "this row is
+ * broken", and an inconsistently interactive list is harder to scan.
+ */
 function CohortRow({ label, count, cohort, onOpen, active }: { label: string; count: number; cohort: MemberCohort; onOpen: (c: MemberCohort | null) => void; active: boolean }) {
-	// A zero row has nothing to show, so it stays a plain row.
-	if (count === 0) {
-		return (
-			<div className="detail-row">
-				<span>{label}</span>
-				<strong>0</strong>
-			</div>
-		);
-	}
-
 	return (
 		<button
 			className={active ? "detail-row cohort-row open" : "detail-row cohort-row"}
@@ -1994,7 +1990,7 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 			{loading ? (
 				<div className="loading-state">Loading members...</div>
 			) : members.length === 0 ? (
-				<div className="empty-state">No members in this group.</div>
+				<div className="empty-state">{COHORT_EMPTY[cohort]}</div>
 			) : (
 				<div className="table-wrap">
 					<table className="data-table">
@@ -2016,6 +2012,16 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 		</div>
 	);
 }
+
+/** Why a group is empty, which is more useful than "no members". */
+const COHORT_EMPTY: Record<MemberCohort, string> = {
+	active: "No members have an active plan right now.",
+	inactive: "No members are inactive — everyone holds a live plan.",
+	lapsed: "Nobody has let a plan expire without renewing.",
+	never_subscribed: "Every member has bought at least one plan.",
+	suspended: "No accounts are suspended.",
+	joined_this_month: "No members joined this month.",
+};
 
 const COHORT_LABELS: Record<MemberCohort, string> = {
 	active: "Active members",
