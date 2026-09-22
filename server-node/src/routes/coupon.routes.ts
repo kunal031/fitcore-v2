@@ -2,11 +2,11 @@
  * `/api/v1/coupons`
  *
  * `/validate/:code` is declared before `/:couponId`, so "validate" is not read
- * as a coupon id. Validation is the one route members may call.
+ * as a coupon id.
  *
- * Listing is readable by staff — a trainer at the desk needs to tell a member
- * which offers are running. Creating, editing and deactivating remain
- * owner-only, so a trainer can see the catalogue but not change it.
+ * Listing is open to any signed-in user, but the controller narrows it by
+ * role: members see only redeemable offers, staff see everything. Creating,
+ * editing and deactivating remain owner-only.
  */
 import { Router } from "express";
 
@@ -21,7 +21,6 @@ import {
 import {
   requireAuth,
   requireOwner,
-  requireTrainerOrOwner,
   validate,
 } from "../middleware/index.js";
 
@@ -39,9 +38,10 @@ couponRoutes.get(
   couponController.validate,
 );
 
-// ── Staff-readable ─────────────────────────────────────────────────────────
-// Read-only for trainers; every write below stays owner-only.
-couponRoutes.get("", requireTrainerOrOwner, couponController.listAll);
+// ── Readable by any signed-in user ─────────────────────────────────────────
+// The controller narrows the result for members to offers they can redeem
+// today; staff see the full catalogue. Every write below stays owner-only.
+couponRoutes.get("", couponController.listAll);
 
 // ── Owner-only management ──────────────────────────────────────────────────
 

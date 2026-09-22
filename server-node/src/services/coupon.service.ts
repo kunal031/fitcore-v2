@@ -65,6 +65,32 @@ export const couponService = {
     return coupons.map(toCouponRead);
   },
 
+  /**
+   * Offers a member could redeem right now.
+   *
+   * Staff see the full catalogue through `listAll`, including expired and
+   * exhausted codes they may still need to explain. Members only want what
+   * works today, so this drops anything inactive, outside its validity window
+   * or at its global usage cap.
+   *
+   * Per-member limits are deliberately not applied here: that check needs a
+   * plan to price against, and validation at checkout already enforces it.
+   */
+  async listRedeemable(): Promise<CouponRead[]> {
+    const now = getUtcNow();
+    const coupons = await couponRepository.listAll();
+
+    return coupons
+      .filter(
+        (coupon) =>
+          coupon.is_active &&
+          coupon.valid_from <= now &&
+          coupon.valid_until >= now &&
+          coupon.current_uses < coupon.max_uses,
+      )
+      .map(toCouponRead);
+  },
+
   async getById(couponId: string): Promise<CouponRead> {
     const coupon = await couponRepository.findById(couponId);
     if (!coupon) {
