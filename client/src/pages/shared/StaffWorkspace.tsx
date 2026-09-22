@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { BadgePercent, CalendarCheck, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BadgePercent, CalendarCheck, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage } from "../../lib/axios";
 import {
@@ -19,18 +19,22 @@ import {
 	type PlanWritePayload,
 } from "../../services/planService";
 import {
+	getMemberAttendance,
 	getTodayCheckIns,
 	getTrainerDashboard,
 	markAttendance,
+	type AttendanceRecord,
 	type TodayCheckIn,
 	type TrainerDashboard,
 } from "../../services/checkinService";
 import {
 	getMyProfile,
+	getUserById,
 	listMembers,
 	updateMyProfile,
 	type MemberListItem,
 } from "../../services/userService";
+import { getSubscriptionById, type Subscription } from "../../services/subscriptionService";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { roleLabels } from "../../router/routes";
 import type { AuthUser, MemberProfile } from "../../store/authStore";
@@ -39,7 +43,7 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-const STAFF_TABS = ["plans", "coupons", "members", "catalogue", "profile"] as const;
+const STAFF_TABS = ["members", "record", "plans", "coupons", "catalogue", "profile"] as const;
 type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
@@ -60,8 +64,11 @@ export default function StaffWorkspace({
 }) {
 	const isAdmin = user.role === "owner";
 	// Trainers land on attendance — the thing they do all day.
-	const homeTab: StaffTab = isAdmin ? "plans" : "members";
+	// Admins land on Members; the logo returns here.
+	const homeTab: StaffTab = "members";
 	// URL-backed, so a staff view can be linked to and the back button works.
+	// Set while a member profile is open on the Members tab.
+	const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 	const [tab, setTab] = useTabRoute<StaffTab>({
 		validTabs: STAFF_TABS,
 		fallback: homeTab,
@@ -72,9 +79,10 @@ export default function StaffWorkspace({
 		() =>
 			(isAdmin
 				? ([
+						["members", Users, "Members"],
+						["record", CalendarCheck, "Record"],
 						["plans", LayoutGrid, "Plans"],
 						["coupons", BadgePercent, "Coupons"],
-						["members", Users, "Members"],
 				  ] as const)
 				: // Trainers: mark attendance, look up what is on sale, manage their
 				  // own profile. Plan and coupon editing stays with the Admin.
@@ -118,7 +126,12 @@ export default function StaffWorkspace({
 
 					{tab === "plans" && isAdmin && <PlanManager />}
 					{tab === "coupons" && isAdmin && <CouponManager />}
-					{tab === "members" && <MemberManager isAdmin={isAdmin} />}
+					{tab === "members" && (
+						selectedMemberId
+							? <MemberDetail memberId={selectedMemberId} onBack={() => setSelectedMemberId(null)} />
+							: <MemberDirectory onOpenMember={setSelectedMemberId} />
+					)}
+					{tab === "record" && <AttendanceRecorder />}
 					{tab === "catalogue" && <CatalogueView />}
 					{tab === "profile" && <StaffProfileView user={user} />}
 				</main>
@@ -224,15 +237,66 @@ function PlanManager() {
 	const change = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
 		setForm((current) => ({ ...current, [key]: event.target.value }));
 
+	const activePlans = plans.filter((plan) => plan.is_active);
+	const inactivePlans = plans.filter((plan) => !plan.is_active);
+
+	const sections = useMemo(
+		() => [
+			{ id: "active-plans", label: "Active plans" },
+			{ id: "inactive-plans", label: "Inactive plans" },
+			{ id: "add-plan", label: "Add new plan" },
+		],
+		[],
+	);
+	const { activeSection, jumpTo } = useSectionJump(sections);
+
+	/** Opens the form and scrolls to it, so "Add new plan" always lands there. */
+	function startCreate() {
+		openCreate();
+		window.setTimeout(() => jumpTo("add-plan"), 60);
+	}
+
+	function startEdit(plan: Plan) {
+		openEdit(plan);
+		window.setTimeout(() => jumpTo("add-plan"), 60);
+	}
+
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Plan management</p><h2>Membership plans</h2></div>
-				<button className="primary-action compact-button" onClick={openCreate}>New plan</button>
-			</div>
+			<SectionJump
+				sections={sections}
+				activeSection={activeSection}
+				onJump={(id) => { if (id === "add-plan" && !showForm) startCreate(); else jumpTo(id); }}
+			/>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
+
+			<div id="active-plans" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Plan management</p><h2>Active plans</h2></div>
+					<span className="muted">{activePlans.length} on sale</span>
+				</div>
+				{loading ? <div className="loading-state">Loading plans...</div>
+					: activePlans.length === 0 ? <div className="empty-state">No active plans. Add one below.</div>
+					: <div className="plan-list">{activePlans.map((plan) => renderPlanCard(plan))}</div>}
+			</div>
+
+			<div id="inactive-plans" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Archived</p><h2>Inactive plans</h2></div>
+					<span className="muted">{inactivePlans.length} archived</span>
+				</div>
+				{inactivePlans.length === 0
+					? <div className="empty-state">No archived plans.</div>
+					: <div className="plan-list">{inactivePlans.map((plan) => renderPlanCard(plan))}</div>}
+			</div>
+
+			<div id="add-plan" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Create</p><h2>{editingId ? "Edit plan" : "Add new plan"}</h2></div>
+					{!showForm && <button className="primary-action compact-button" onClick={startCreate}>New plan</button>}
+				</div>
 
 			{showForm && (
 				<article className="staff-form">
@@ -257,28 +321,28 @@ function PlanManager() {
 				</article>
 			)}
 
-			{loading ? <div className="loading-state">Loading plans...</div> : plans.length === 0 ? <div className="empty-state">No plans yet. Create your first plan.</div> : (
-				<div className="plan-list">
-					{plans.map((plan) => (
-						<article className={plan.is_active ? "plan-card" : "plan-card inactive"} key={plan.id}>
-							<div className="plan-card-top">
-								<span className="plan-category">{plan.category}</span>
-								<strong>{money(plan.price_paise)}</strong>
-							</div>
-							<h3>{plan.plan_name}</h3>
-							<p>{plan.description || "No description."}</p>
-							<div className="plan-meta"><span>{plan.calendar_days} calendar days</span><span>{plan.allocated_days} gym visits</span></div>
-							<span className={plan.is_active ? "status-dot" : "status-dot failed"}>{plan.is_active ? "Active" : "Archived"}</span>
-							<div className="form-actions">
-								<button className="outline-button compact-button" onClick={() => openEdit(plan)}>Edit</button>
-								<button className="outline-button compact-button" onClick={() => toggleActive(plan)}>{plan.is_active ? "Deactivate" : "Activate"}</button>
-							</div>
-						</article>
-					))}
-				</div>
-			)}
+			</div>
 		</section>
 	);
+
+	function renderPlanCard(plan: Plan) {
+		return (
+			<article className={plan.is_active ? "plan-card" : "plan-card inactive"} key={plan.id}>
+				<div className="plan-card-top">
+					<span className="plan-category">{plan.category}</span>
+					<strong>{money(plan.price_paise)}</strong>
+				</div>
+				<h3>{plan.plan_name}</h3>
+				<p>{plan.description || "No description."}</p>
+				<div className="plan-meta"><span>{plan.calendar_days} calendar days</span><span>{plan.allocated_days} gym visits</span></div>
+				<span className={plan.is_active ? "status-dot" : "status-dot failed"}>{plan.is_active ? "Active" : "Archived"}</span>
+				<div className="form-actions">
+					<button className="outline-button compact-button" onClick={() => startEdit(plan)}>Edit</button>
+					<button className="outline-button compact-button" onClick={() => toggleActive(plan)}>{plan.is_active ? "Deactivate" : "Activate"}</button>
+				</div>
+			</article>
+		);
+	}
 }
 
 /* ── Admin: coupon management ───────────────────────────────────────────── */
@@ -351,15 +415,60 @@ function CouponManager() {
 	const discountLabel = (coupon: Coupon) =>
 		coupon.discount_type === "percentage" ? `${coupon.discount_value}% off` : `${money(coupon.discount_value)} off`;
 
+	const activeCoupons = coupons.filter((coupon) => coupon.is_active);
+	const inactiveCoupons = coupons.filter((coupon) => !coupon.is_active);
+
+	const sections = useMemo(
+		() => [
+			{ id: "active-coupons", label: "Active coupons" },
+			{ id: "inactive-coupons", label: "Inactive coupons" },
+			{ id: "add-coupon", label: "Add new coupon" },
+		],
+		[],
+	);
+	const { activeSection, jumpTo } = useSectionJump(sections);
+
+	function startCreate() {
+		setForm(emptyCouponForm); setShowForm(true); setNotice(""); setError("");
+		window.setTimeout(() => jumpTo("add-coupon"), 60);
+	}
+
 	return (
 		<section className="view-stack">
-			<div className="section-heading">
-				<div><p className="eyebrow">Coupon management</p><h2>Discount coupons</h2></div>
-				<button className="primary-action compact-button" onClick={() => { setForm(emptyCouponForm); setShowForm(true); setNotice(""); setError(""); }}>New coupon</button>
-			</div>
+			<SectionJump
+				sections={sections}
+				activeSection={activeSection}
+				onJump={(id) => { if (id === "add-coupon" && !showForm) startCreate(); else jumpTo(id); }}
+			/>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
+
+			<div id="active-coupons" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Coupon management</p><h2>Active coupons</h2></div>
+					<span className="muted">{activeCoupons.length} running</span>
+				</div>
+				{loading ? <div className="loading-state">Loading coupons...</div>
+					: activeCoupons.length === 0 ? <div className="empty-state">No active coupons. Add one below.</div>
+					: <div className="history-list">{activeCoupons.map((coupon) => renderCouponRow(coupon))}</div>}
+			</div>
+
+			<div id="inactive-coupons" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Archived</p><h2>Inactive coupons</h2></div>
+					<span className="muted">{inactiveCoupons.length} archived</span>
+				</div>
+				{inactiveCoupons.length === 0
+					? <div className="empty-state">No inactive coupons.</div>
+					: <div className="history-list">{inactiveCoupons.map((coupon) => renderCouponRow(coupon))}</div>}
+			</div>
+
+			<div id="add-coupon" className="jump-target">
+				<div className="section-heading">
+					<div><p className="eyebrow">Create</p><h2>Add new coupon</h2></div>
+					{!showForm && <button className="primary-action compact-button" onClick={startCreate}>New coupon</button>}
+				</div>
 
 			{showForm && (
 				<article className="staff-form">
@@ -387,26 +496,26 @@ function CouponManager() {
 				</article>
 			)}
 
-			{loading ? <div className="loading-state">Loading coupons...</div> : coupons.length === 0 ? <div className="empty-state">No coupons yet.</div> : (
-				<div className="history-list">
-					{coupons.map((coupon) => (
-						<article className="coupon-row" key={coupon.id}>
-							<div className="coupon-row-main">
-								<div><strong>{coupon.code}</strong><span>{coupon.name} · {discountLabel(coupon)}</span></div>
-								<span className={coupon.is_active ? "status-dot" : "status-dot failed"}>{coupon.is_active ? "Active" : "Inactive"}</span>
-							</div>
-							<div className="coupon-row-meta">
-								<span>Used {coupon.current_uses}/{coupon.max_uses}</span>
-								<span>Limit {coupon.per_user_limit}/user</span>
-								<span>Expires {dateLabel(coupon.valid_until)}</span>
-							</div>
-							<button className="outline-button compact-button" onClick={() => toggleActive(coupon)}>{coupon.is_active ? "Deactivate" : "Activate"}</button>
-						</article>
-					))}
-				</div>
-			)}
+			</div>
 		</section>
 	);
+
+	function renderCouponRow(coupon: Coupon) {
+		return (
+			<article className="coupon-row" key={coupon.id}>
+				<div className="coupon-row-main">
+					<div><strong>{coupon.code}</strong><span>{coupon.name} · {discountLabel(coupon)}</span></div>
+					<span className={coupon.is_active ? "status-dot" : "status-dot failed"}>{coupon.is_active ? "Active" : "Inactive"}</span>
+				</div>
+				<div className="coupon-row-meta">
+					<span>Used {coupon.current_uses}/{coupon.max_uses}</span>
+					<span>Limit {coupon.per_user_limit}/user</span>
+					<span>Expires {dateLabel(coupon.valid_until)}</span>
+				</div>
+				<button className="outline-button compact-button" onClick={() => toggleActive(coupon)}>{coupon.is_active ? "Deactivate" : "Activate"}</button>
+			</article>
+		);
+	}
 }
 
 /* ── Trainer/Admin: members and attendance ──────────────────────────────── */
@@ -806,5 +915,398 @@ function Detail({ label, value }: { label: string; value: string }) {
 			<span>{label}</span>
 			<strong>{value}</strong>
 		</div>
+	);
+}
+
+/* ── Admin: member directory ─────────────────────────────────────────────── */
+
+/**
+ * Every gym member, with a headline count and search.
+ *
+ * Opening a row shows that member's profile rather than navigating away, so
+ * returning to the list keeps the search term.
+ */
+function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void }) {
+	const [members, setMembers] = useState<MemberListItem[]>([]);
+	const [total, setTotal] = useState(0);
+	const [search, setSearch] = useState("");
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	const load = useCallback(async (term: string) => {
+		setLoading(true);
+		try {
+			const result = await listMembers({ search: term, role: "member", limit: 100 });
+			setMembers(result.items);
+			setTotal(result.meta.total);
+			setError("");
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	useEffect(() => { void load(""); }, [load]);
+
+	// Debounced so typing does not fire a request per keystroke.
+	useEffect(() => {
+		const timer = window.setTimeout(() => { void load(search.trim()); }, 350);
+		return () => window.clearTimeout(timer);
+	}, [search, load]);
+
+	const activeCount = members.filter((m) => m.gym_meta.membership_status === "active").length;
+
+	return (
+		<section className="view-stack">
+			<div className="section-heading">
+				<div><p className="eyebrow">Members</p><h2>Gym members</h2></div>
+			</div>
+
+			<div className="insight-grid">
+				<article className="insight-card accent-card">
+					<Users size={19} /><strong>{total}</strong><span>total members</span>
+				</article>
+				<article className="insight-card">
+					<CalendarCheck size={19} /><strong>{activeCount}</strong><span>active now</span>
+				</article>
+			</div>
+
+			<div className="search-row">
+				<Search size={16} />
+				<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone" aria-label="Search members" />
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{loading ? (
+				<div className="loading-state">Loading members...</div>
+			) : members.length === 0 ? (
+				<div className="empty-state">No members matched your search.</div>
+			) : (
+				<div className="history-list">
+					{members.map((member) => (
+						<button className="history-row pass-row" key={member.id} onClick={() => onOpenMember(member.id)}>
+							<div>
+								<strong>{member.full_name}</strong>
+								<span>{member.phone} · joined {dateLabel(member.gym_meta.joined_on)}</span>
+							</div>
+							<div className="pass-row-right">
+								<span className={member.gym_meta.membership_status === "active" ? "status-dot" : "muted"}>
+									{member.gym_meta.membership_status}
+								</span>
+							</div>
+							<ChevronRight size={17} />
+						</button>
+					))}
+				</div>
+			)}
+		</section>
+	);
+}
+
+/* ── Admin: one member's profile ─────────────────────────────────────────── */
+
+/**
+ * A member's details, plan and attendance, with the option to mark them
+ * present. Marking refreshes the record in place so the change is visible
+ * without a reload.
+ */
+function MemberDetail({ memberId, onBack }: { memberId: string; onBack: () => void }) {
+	const [member, setMember] = useState<MemberProfile | null>(null);
+	const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+	const [subscription, setSubscription] = useState<Subscription | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [marking, setMarking] = useState(false);
+	const [error, setError] = useState("");
+	const [notice, setNotice] = useState("");
+
+	const load = useCallback(async () => {
+		setLoading(true);
+		try {
+			const profile = await getUserById(memberId);
+			setMember(profile);
+			// allSettled: a member with no plan should still show their profile.
+			const [log, sub] = await Promise.allSettled([
+				getMemberAttendance(memberId),
+				profile.active_subscription_id
+					? getSubscriptionById(profile.active_subscription_id)
+					: Promise.resolve(null),
+			]);
+			if (log.status === "fulfilled") setAttendance(log.value);
+			if (sub.status === "fulfilled") setSubscription(sub.value);
+			setError("");
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setLoading(false);
+		}
+	}, [memberId]);
+
+	useEffect(() => { void load(); }, [load]);
+
+	const todayKey = new Date().toISOString().slice(0, 10);
+	const presentToday = attendance.some((entry) => entry.date === todayKey);
+
+	async function mark() {
+		setMarking(true); setError(""); setNotice("");
+		try {
+			const result = await markAttendance(memberId);
+			setNotice(result.message ?? "Attendance marked.");
+			await load();
+		} catch (requestError) {
+			// Covers no active plan, expired plan and exhausted quota.
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setMarking(false);
+		}
+	}
+
+	if (loading) return <div className="loading-state">Loading member...</div>;
+	if (!member) return <div className="empty-state">{error || "Member not found."}</div>;
+
+	return (
+		<section className="view-stack">
+			<button className="back-button" onClick={onBack}><ChevronLeft size={16} /> Back to members</button>
+
+			<div className="profile-card">
+				<div className="profile-avatar">{member.full_name.charAt(0)}</div>
+				<div>
+					<h3>{member.full_name}</h3>
+					<p>{member.phone}{member.email ? ` · ${member.email}` : ""}</p>
+					<span className={member.gym_meta?.membership_status === "active" ? "status-dot" : "muted"}>
+						{member.gym_meta?.membership_status ?? "inactive"}
+					</span>
+				</div>
+				<button className="primary-action compact-button" onClick={mark} disabled={marking || presentToday}>
+					{marking ? "Marking..." : presentToday ? "Present today" : "Mark attendance"}
+				</button>
+			</div>
+
+			{notice && <div className="profile-message">{notice}</div>}
+			{error && <div className="error-message">{error}</div>}
+
+			<div className="insight-grid">
+				<article className="insight-card accent-card">
+					<CalendarCheck size={19} /><strong>{attendance.length}</strong><span>total visits</span>
+				</article>
+				<article className="insight-card">
+					<Clock size={19} /><strong>{subscription?.days_remaining ?? 0}</strong><span>visits left</span>
+				</article>
+			</div>
+
+			<div className="section-heading"><h2>Details</h2></div>
+			<div className="detail-list">
+				<Detail label="Phone" value={member.phone} />
+				<Detail label="Email" value={member.email ?? "Not added"} />
+				<Detail label="Joined" value={dateLabel(member.gym_meta?.joined_on)} />
+				<Detail label="Blood group" value={member.profile?.blood_group ?? "Not added"} />
+				<Detail label="Address" value={[member.profile?.address?.city, member.profile?.address?.state].filter(Boolean).join(", ") || "Not added"} />
+				<Detail label="Current plan" value={subscription?.plan_snapshot.plan_name ?? "No active plan"} />
+				{subscription && <Detail label="Expires" value={dateLabel(subscription.expires_on)} />}
+			</div>
+
+			<div className="section-heading">
+				<h2>Attendance</h2>
+				<span className="muted">{attendance.length} visits</span>
+			</div>
+			{attendance.length === 0 ? (
+				<div className="empty-state">No visits recorded yet.</div>
+			) : (
+				<div className="history-list">
+					{attendance.slice(0, 20).map((entry) => (
+						<article className="history-row" key={`${entry.date}-${entry.check_in_time}`}>
+							<div>
+								<strong>{dateLabel(entry.date)}</strong>
+								<span>{new Date(entry.check_in_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+							</div>
+						</article>
+					))}
+				</div>
+			)}
+		</section>
+	);
+}
+
+/* ── Staff: attendance recorder ──────────────────────────────────────────── */
+
+/**
+ * The front-desk flow: search, then mark present in one tap without leaving
+ * the list. The member profile has the same action for when staff are already
+ * looking at that person.
+ */
+function AttendanceRecorder() {
+	const [members, setMembers] = useState<MemberListItem[]>([]);
+	const [today, setToday] = useState<TodayCheckIn[]>([]);
+	const [summary, setSummary] = useState<TrainerDashboard | null>(null);
+	const [search, setSearch] = useState("");
+	const [loading, setLoading] = useState(true);
+	const [markingId, setMarkingId] = useState<string | null>(null);
+	const [error, setError] = useState("");
+	const [notice, setNotice] = useState("");
+
+	const load = useCallback(async (term: string) => {
+		setLoading(true);
+		const [memberResult, todayResult, summaryResult] = await Promise.allSettled([
+			listMembers({ search: term, role: "member", limit: 100 }),
+			getTodayCheckIns(),
+			getTrainerDashboard(),
+		]);
+		if (memberResult.status === "fulfilled") { setMembers(memberResult.value.items); setError(""); }
+		else setError(apiErrorMessage(memberResult.reason));
+		if (todayResult.status === "fulfilled") setToday(todayResult.value);
+		if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
+		setLoading(false);
+	}, []);
+
+	useEffect(() => { void load(""); }, [load]);
+	useEffect(() => {
+		const timer = window.setTimeout(() => { void load(search.trim()); }, 350);
+		return () => window.clearTimeout(timer);
+	}, [search, load]);
+
+	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+
+	async function mark(member: MemberListItem) {
+		setMarkingId(member.id); setError(""); setNotice("");
+		try {
+			const result = await markAttendance(member.id);
+			setNotice(result.message ?? `Attendance marked for ${member.full_name}.`);
+			const [refreshedToday, refreshedSummary] = await Promise.allSettled([
+				getTodayCheckIns(),
+				getTrainerDashboard(),
+			]);
+			if (refreshedToday.status === "fulfilled") setToday(refreshedToday.value);
+			if (refreshedSummary.status === "fulfilled") setSummary(refreshedSummary.value);
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setMarkingId(null);
+		}
+	}
+
+	return (
+		<section className="view-stack">
+			<div className="section-heading">
+				<div><p className="eyebrow">Record</p><h2>Mark attendance</h2></div>
+				<span className="muted">{today.length} checked in today</span>
+			</div>
+
+			{summary && (
+				<div className="insight-grid">
+					<article className="insight-card accent-card">
+						<CalendarCheck size={19} /><strong>{summary.checkins_today}</strong><span>checked in today</span>
+					</article>
+					<article className="insight-card">
+						<Clock size={19} /><strong>{summary.expiring_soon_count}</strong><span>renewals due this week</span>
+					</article>
+				</div>
+			)}
+
+			<div className="search-row">
+				<Search size={16} />
+				<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone" aria-label="Search members" />
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+			{notice && <div className="profile-message">{notice}</div>}
+
+			{loading ? (
+				<div className="loading-state">Loading members...</div>
+			) : members.length === 0 ? (
+				<div className="empty-state">No members matched your search.</div>
+			) : (
+				<div className="history-list">
+					{members.map((member) => {
+						const done = checkedInIds.has(member.id);
+						return (
+							<article className="history-row" key={member.id}>
+								<div>
+									<strong>{member.full_name}</strong>
+									<span>{member.phone} · {member.gym_meta.membership_status}</span>
+								</div>
+								{done ? (
+									<span className="status-dot">Present today</span>
+								) : (
+									<button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
+										{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
+									</button>
+								)}
+							</article>
+						);
+					})}
+				</div>
+			)}
+		</section>
+	);
+}
+
+/* ── Shared: section jump navigation ─────────────────────────────────────── */
+
+/**
+ * Pills that scroll to a section and track which one is in view.
+ *
+ * Same behaviour as the member pages, extracted so the plan and coupon
+ * managers share it rather than each growing their own copy.
+ */
+function useSectionJump(sections: { id: string; label: string }[]) {
+	const [activeSection, setActiveSection] = useState(sections[0]?.id ?? "");
+	const jumpingRef = useRef(false);
+
+	useEffect(() => {
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (jumpingRef.current) return;
+				const visible = entries
+					.filter((entry) => entry.isIntersecting)
+					.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+				if (visible) setActiveSection(visible.target.id);
+			},
+			{ rootMargin: "-120px 0px -55% 0px", threshold: 0 },
+		);
+		for (const section of sections) {
+			const element = document.getElementById(section.id);
+			if (element) observer.observe(element);
+		}
+
+		// The last section can be too short to enter the band above, which
+		// would strand the previous pill.
+		function handleScroll() {
+			if (jumpingRef.current) return;
+			const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 2;
+			const last = sections[sections.length - 1];
+			if (atBottom && last) setActiveSection(last.id);
+		}
+		window.addEventListener("scroll", handleScroll, { passive: true });
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("scroll", handleScroll);
+		};
+	}, [sections]);
+
+	function jumpTo(id: string) {
+		setActiveSection(id);
+		jumpingRef.current = true;
+		document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+		window.setTimeout(() => { jumpingRef.current = false; }, 700);
+	}
+
+	return { activeSection, jumpTo };
+}
+
+function SectionJump({ sections, activeSection, onJump }: { sections: { id: string; label: string }[]; activeSection: string; onJump: (id: string) => void }) {
+	return (
+		<nav className="section-jump" aria-label="Jump to section">
+			{sections.map((section) => (
+				<button
+					key={section.id}
+					className={activeSection === section.id ? "jump-pill active" : "jump-pill"}
+					aria-current={activeSection === section.id ? "true" : undefined}
+					onClick={() => onJump(section.id)}
+				>
+					{section.label}
+				</button>
+			))}
+		</nav>
 	);
 }
