@@ -25,6 +25,94 @@ api.interceptors.request.use((config) => {
 	return config;
 });
 
+/**
+ * Clear the session and return to login.
+ *
+ * A hard navigation rather than a router push: it throws away every
+ * component's in-memory state, so no stale screen can linger showing data the
+ * signed-out user should no longer see.
+ */
+export function endSession() {
+	localStorage.removeItem("fitcore_access_token");
+	localStorage.removeItem("fitcore_refresh_token");
+	localStorage.removeItem("fitcore-session");
+	if (window.location.pathname !== "/login") {
+		window.location.assign("/login");
+	}
+}
+
+/**
+ * Refresh the access token, sharing one request across concurrent failures.
+ *
+ * A dashboard fires several requests at once; without this, each 401 would
+ * start its own refresh, and all but one would be rejected for reusing a
+ * spent token — logging the user out mid-session.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+	const refreshToken = localStorage.getItem("fitcore_refresh_token");
+	if (!refreshToken) return null;
+
+	refreshInFlight ??= (async () => {
+		try {
+			// A bare axios call: the instance below would recurse through this
+			// same interceptor on failure.
+			const response = await axios.post<{
+				data: { access_token: string; refresh_token: string };
+			}>(`${apiBaseUrl ?? "/api/v1"}/auth/refresh`, { refresh_token: refreshToken });
+
+			const { access_token, refresh_token } = response.data.data;
+			localStorage.setItem("fitcore_access_token", access_token);
+			localStorage.setItem("fitcore_refresh_token", refresh_token);
+			return access_token;
+		} catch {
+			return null;
+		} finally {
+			refreshInFlight = null;
+		}
+	})();
+
+	return refreshInFlight;
+}
+
+/**
+ * On a 401, try once to refresh and replay the request; sign out if that
+ * fails.
+ *
+ * Without this an expired token left the app half signed in — the user
+ * object persists separately, so the shell rendered while every panel came
+ * back empty.
+ */
+api.interceptors.response.use(
+	(response) => response,
+	async (error: unknown) => {
+		if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+			return Promise.reject(error);
+		}
+
+		const request = error.config as (typeof error.config & { _retried?: boolean }) | undefined;
+
+		// The refresh call itself failing, or a second failure on the same
+		// request, means the session is genuinely over.
+		if (!request || request._retried || request.url?.includes("/auth/refresh")) {
+			endSession();
+			return Promise.reject(error);
+		}
+
+		const token = await refreshAccessToken();
+		if (!token) {
+			endSession();
+			return Promise.reject(error);
+		}
+
+		request._retried = true;
+		request.headers = request.headers ?? {};
+		request.headers.Authorization = `Bearer ${token}`;
+		return api(request);
+	},
+);
+
 export function apiErrorMessage(error: unknown): string {
 	if (axios.isAxiosError(error)) {
 		if (!error.response) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BadgeIndianRupee, CalendarDays, ChevronLeft, ChevronRight, Download, CheckCircle2, CreditCard, Copy, Dumbbell, LogOut, Moon, Share2, Sparkles, Sun, Tag, Ticket, UserRound, Users } from "lucide-react";
 
-import { apiErrorMessage } from "../../lib/axios";
+import { apiErrorMessage, endSession } from "../../lib/axios";
 import { logout } from "../../services/authService";
 import { getCoupons, validateCoupon, type Coupon, type CouponValidation } from "../../services/couponService";
 import { getPlans, type Plan } from "../../services/planService";
@@ -36,8 +36,19 @@ export default function DashboardPage() {
     localStorage.setItem("fitcore_theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
-  async function handleLogout() {
-    try { await logout(); } finally { clearSession(); window.location.assign("/login"); }
+  function handleLogout() {
+    // Clear locally and leave straight away. Waiting on the API first meant a
+    // slow or sleeping backend left the user sitting on the dashboard after
+    // pressing sign out.
+    //
+    // The server call still goes out — it bumps token_version, retiring every
+    // token already issued — but nothing depends on it returning.
+    void logout().catch(() => {
+      // A failed call only means old tokens stay valid until they expire;
+      // the local session is gone either way.
+    });
+    clearSession();
+    endSession();
   }
 
   if (!user) return null;
