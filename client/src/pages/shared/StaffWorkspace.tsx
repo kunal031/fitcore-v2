@@ -183,6 +183,86 @@ export default function StaffWorkspace({
 	);
 }
 
+/* ── Paging ─────────────────────────────────────────────────────────────── */
+
+/** Rows shown per page in every gym-user and trainer listing. */
+const PAGE_SIZE = 10;
+
+/**
+ * Page controls for a list.
+ *
+ * Renders nothing for a single page, so a short list is not cluttered by a
+ * control that cannot do anything.
+ */
+function Pager({
+	page,
+	pages,
+	total,
+	onPage,
+	noun = "entries",
+}: {
+	page: number;
+	pages: number;
+	total: number;
+	onPage: (page: number) => void;
+	noun?: string;
+}) {
+	if (pages <= 1) return null;
+
+	// Inclusive, 1-based, and clamped to the total so the last page does not
+	// advertise rows it has not got.
+	const first = (page - 1) * PAGE_SIZE + 1;
+	const last = Math.min(page * PAGE_SIZE, total);
+
+	return (
+		<div className="pager">
+			<span className="muted">{first}–{last} of {total} {noun}</span>
+			<div className="pager-actions">
+				<button
+					className="outline-button compact-button"
+					onClick={() => onPage(page - 1)}
+					disabled={page <= 1}
+				>
+					<ChevronLeft size={15} /> Previous
+				</button>
+				<span className="pager-page">Page {page} of {pages}</span>
+				<button
+					className="outline-button compact-button"
+					onClick={() => onPage(page + 1)}
+					disabled={page >= pages}
+				>
+					Next <ChevronRight size={15} />
+				</button>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * Page a list that arrives whole.
+ *
+ * Trainer and cohort endpoints return every row at once, so the slicing
+ * happens here rather than server-side. The page is pulled back in range when
+ * the list shrinks — filtering to fewer rows while on page 3 would otherwise
+ * leave an empty table and no obvious way back.
+ */
+function useClientPage<T>(items: T[]) {
+	const [page, setPage] = useState(1);
+	const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+
+	useEffect(() => {
+		if (page > pages) setPage(pages);
+	}, [page, pages]);
+
+	const safePage = Math.min(page, pages);
+	const slice = useMemo(
+		() => items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+		[items, safePage],
+	);
+
+	return { page: safePage, pages, total: items.length, slice, setPage };
+}
+
 /* ── Admin: gym settings ────────────────────────────────────────────────── */
 
 /**
@@ -758,6 +838,7 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
 	}, [search, load]);
 
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+	const memberPage = useClientPage(members);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -816,23 +897,32 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
 			{notice && <div className="profile-message">{notice}</div>}
 
 			{loading ? <div className="loading-state">Loading members...</div> : members.length === 0 ? <div className="empty-state">No members matched your search.</div> : (
-				<div className="history-list">
-					{members.map((member) => {
-						const done = checkedInIds.has(member.id);
-						return (
-							<article className="history-row" key={member.id}>
-								<div>
-									<strong>{member.full_name}</strong>
-									<span>{member.phone} · {member.gym_meta.membership_status}</span>
-								</div>
-								{done
-									? <span className="status-dot">Present today</span>
-									: <button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
-											{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
-										</button>}
-							</article>
-						);
-					})}
+				<div>
+					<div className="history-list">
+						{memberPage.slice.map((member) => {
+							const done = checkedInIds.has(member.id);
+							return (
+								<article className="history-row" key={member.id}>
+									<div>
+										<strong>{member.full_name}</strong>
+										<span>{member.phone} · {member.gym_meta.membership_status}</span>
+									</div>
+									{done
+										? <span className="status-dot">Present today</span>
+										: <button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
+												{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
+											</button>}
+								</article>
+							);
+						})}
+					</div>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="members"
+					/>
 				</div>
 			)}
 
@@ -1258,18 +1348,28 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 	const [notice, setNotice] = useState("");
 	const [creating, setCreating] = useState<"member" | "trainer" | null>(null);
 	const [saving, setSaving] = useState(false);
+	// Members page on the server, which already caps and counts them.
+	const [page, setPage] = useState(1);
+	const [pages, setPages] = useState(1);
 
-	const load = useCallback(async (term: string) => {
+	const load = useCallback(async (term: string, wanted: number) => {
 		setLoading(true);
 		try {
 			// Today's check-ins drive the per-row attendance state. The member
 			// list carries each plan, so the table needs no per-row lookup.
 			const [result, todayList] = await Promise.all([
-				listMembers({ search: term, role: "member", limit: 100, includeSubscription: true }),
+				listMembers({
+					search: term,
+					role: "member",
+					page: wanted,
+					limit: PAGE_SIZE,
+					includeSubscription: true,
+				}),
 				getTodayCheckIns(),
 			]);
 			setMembers(result.items);
 			setTotal(result.meta.total);
+			setPages(Math.max(1, result.meta.pages));
 			setScope(result.scope ?? "all");
 			setToday(todayList);
 			// GET /users/trainers is owner-only, so a trainer asking for it gets
@@ -1284,13 +1384,15 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 		}
 	}, [isAdmin]);
 
-	useEffect(() => { void load(""); }, [load]);
-
-	// Debounced so typing does not fire a request per keystroke.
+	// Debounced so typing does not fire a request per keystroke. Also covers
+	// the first load and every page change, so there is one fetch path.
 	useEffect(() => {
-		const timer = window.setTimeout(() => { void load(search.trim()); }, 350);
+		const timer = window.setTimeout(() => { void load(search.trim(), page); }, 350);
 		return () => window.clearTimeout(timer);
-	}, [search, load]);
+	}, [search, page, load]);
+
+	// A narrower search can leave the current page past the end of the results.
+	useEffect(() => { setPage(1); }, [search]);
 
 	const activeCount = members.filter((m) => m.gym_meta.membership_status === "active").length;
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
@@ -1305,6 +1407,7 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
 		);
 	}, [trainers, search]);
+	const trainerPage = useClientPage(visibleTrainers);
 
 	/**
 	 * Create a gym user or a trainer.
@@ -1349,7 +1452,7 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 
 			setCreating(null);
 			// Trainers may have changed, so reload both lists.
-			await load(search.trim());
+			await load(search.trim(), page);
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
@@ -1472,7 +1575,7 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 								<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
 							</thead>
 							<tbody>
-								{visibleTrainers.map((trainer) => (
+								{trainerPage.slice.map((trainer) => (
 									<tr
 										key={trainer.id}
 										className="row-clickable"
@@ -1500,6 +1603,13 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 								))}
 							</tbody>
 						</table>
+						<Pager
+							page={trainerPage.page}
+							pages={trainerPage.pages}
+							total={trainerPage.total}
+							onPage={trainerPage.setPage}
+							noun="trainers"
+						/>
 					</div>
 				)
 			) : members.length === 0 ? (
@@ -1579,6 +1689,13 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 							})}
 						</tbody>
 					</table>
+					<Pager
+						page={page}
+						pages={pages}
+						total={total}
+						onPage={setPage}
+						noun={scope === "assigned" ? "assigned members" : "gym users"}
+					/>
 				</div>
 			)}
 		</section>
@@ -1778,6 +1895,8 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
 		);
 	}, [trainers, search]);
+	const trainerPage = useClientPage(visibleTrainers);
+	const memberPage = useClientPage(members);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1854,7 +1973,7 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 							<table className="data-table">
 								<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
 								<tbody>
-									{visibleTrainers.map((trainer) => (
+									{trainerPage.slice.map((trainer) => (
 										<tr key={trainer.id}>
 											<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
 											<td data-label="Name"><strong>{trainer.full_name}</strong></td>
@@ -1868,6 +1987,13 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 									))}
 								</tbody>
 							</table>
+							<Pager
+								page={trainerPage.page}
+								pages={trainerPage.pages}
+								total={trainerPage.total}
+								onPage={trainerPage.setPage}
+								noun="trainers"
+							/>
 						</div>
 						<p className="muted catalogue-note">
 							Trainer shifts are not tracked as gym attendance — check-in draws down a
@@ -1882,7 +2008,7 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 					<table className="data-table">
 						<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Attendance</th></tr></thead>
 						<tbody>
-							{members.map((member) => {
+							{memberPage.slice.map((member) => {
 								const done = checkedInIds.has(member.id);
 								return (
 									<tr key={member.id}>
@@ -1907,6 +2033,13 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 							})}
 						</tbody>
 					</table>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="gym users"
+					/>
 				</div>
 			)}
 		</section>
@@ -2456,6 +2589,8 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 		return () => { cancelled = true; };
 	}, [cohort]);
 
+	const memberPage = useClientPage(members);
+
 	return (
 		<div className="cohort-panel">
 			<div className="cohort-panel-head">
@@ -2474,7 +2609,7 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 					<table className="data-table">
 						<thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Joined</th></tr></thead>
 						<tbody>
-							{members.map((member) => (
+							{memberPage.slice.map((member) => (
 								<tr key={member.id}>
 									<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
 									<td data-label="Name"><strong>{member.full_name}</strong></td>
@@ -2485,6 +2620,13 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 							))}
 						</tbody>
 					</table>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="members"
+					/>
 				</div>
 			)}
 		</div>
