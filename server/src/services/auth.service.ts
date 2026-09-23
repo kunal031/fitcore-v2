@@ -232,18 +232,20 @@ export const authService = {
       TOKEN_TYPE.PASSWORD_RESET,
     );
 
-    if (resetPayload.sub !== payload.phone) {
-      throw new AuthError(
-        "The password reset token does not match this phone number.",
-        "INVALID_RESET_TOKEN",
+    const user = await userRepository.findByEmail(payload.email);
+    if (!user) {
+      throw new NotFoundError(
+        "No account found with this email address.",
+        "USER_NOT_FOUND",
       );
     }
 
-    const user = await userRepository.findByPhone(payload.phone);
-    if (!user) {
-      throw new NotFoundError(
-        "No account found with this phone number.",
-        "USER_NOT_FOUND",
+    // The token's subject is the account's phone, so this also proves the
+    // token was issued for the very account being reset.
+    if (resetPayload.sub !== user.phone) {
+      throw new AuthError(
+        "The password reset token does not match this account.",
+        "INVALID_RESET_TOKEN",
       );
     }
 

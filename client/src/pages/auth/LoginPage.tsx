@@ -45,7 +45,13 @@ export default function LoginPage() {
 					<h2>Welcome back.</h2>
 					<form onSubmit={handleSubmit}>
 						<div className="field"><label htmlFor="identifier">Phone or email</label><input id="identifier" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="you@example.com" required /></div>
-						<div className="field"><label htmlFor="password">Password</label><input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required /></div>
+						<div className="field">
+							<div className="field-label-row">
+								<label htmlFor="password">Password</label>
+								<Link className="field-link" to="/forgot-password">Forgot password?</Link>
+							</div>
+							<input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
+						</div>
 						{error && <div className="error-message" role="alert">{error}</div>}
 						<button className="primary-button" type="submit" disabled={loading}>{loading ? "Signing in..." : <>Sign in <ArrowRight size={16} /></>}</button>
 					</form>

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import LoginPage from "../pages/auth/LoginPage";
 import RegisterPage from "../pages/auth/RegisterPage";
+import ForgotPasswordPage from "../pages/auth/ForgotPasswordPage";
 import DashboardPage from "../pages/shared/DashboardPage";
 
 /** Sends signed-out visitors to login, preserving nothing sensitive in the URL. */
@@ -22,6 +23,7 @@ export default function App() {
 		<Routes>
 			<Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
 			<Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
+			<Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
 
 			{/*
 			 * Each dashboard tab is a path segment under /app, so views can be

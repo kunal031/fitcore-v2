@@ -34,3 +34,30 @@ export async function register(payload: {
 export async function logout(): Promise<void> {
 	await api.post("/auth/logout");
 }
+
+/**
+ * Start a password reset.
+ *
+ * Always resolves, whether or not the address is registered — the backend
+ * deliberately gives nothing away, so the UI must not either.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+	await api.post("/auth/send-otp", { email });
+}
+
+/** Exchange a code for a short-lived reset token. Rejects on a bad code. */
+export async function verifyResetOtp(email: string, otp: string): Promise<string> {
+	const response = await api.post<ApiResponse<{ verified: boolean; reset_token: string }>>(
+		"/auth/verify-otp",
+		{ email, otp },
+	);
+	return response.data.data.reset_token;
+}
+
+export async function resetPassword(payload: {
+	email: string;
+	reset_token: string;
+	new_password: string;
+}): Promise<void> {
+	await api.post("/auth/reset-password", payload);
+}

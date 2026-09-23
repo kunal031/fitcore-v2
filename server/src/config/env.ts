@@ -33,6 +33,13 @@ const envSchema = z.object({
 
   // ── CORS ─────────────────────────────────────────────────────────────────
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
+
+  // ── Brevo (transactional email) ──────────────────────────────────────────
+  // Optional, so a developer without a key still boots; the reset flow then
+  // refuses to send rather than the whole server failing to start.
+  BREVO_API_KEY: z.string().default(""),
+  BREVO_SENDER_EMAIL: z.string().default("no-reply@fitcore.app"),
+  BREVO_SENDER_NAME: z.string().default("FitCore"),
 });
 
 /**
@@ -70,6 +77,11 @@ export const settings = {
 
   get isProduction(): boolean {
     return env.ENVIRONMENT === "production";
+  },
+
+  /** Whether transactional email can actually be sent. */
+  get isEmailConfigured(): boolean {
+    return env.BREVO_API_KEY.trim().length > 0;
   },
 
   /**

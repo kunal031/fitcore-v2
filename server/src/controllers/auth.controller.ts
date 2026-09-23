@@ -15,6 +15,7 @@ import type {
   SendOtpInput,
   VerifyOtpInput,
 } from "../dtos/auth.dto.js";
+import { AuthError } from "../errors/index.js";
 import { asyncHandler, currentUser } from "../middleware/index.js";
 import { authService, otpService } from "../services/index.js";
 import { success } from "../utils/apiResponse.js";
@@ -62,23 +63,29 @@ export const authController = {
    * endpoint cannot be used to discover which numbers have accounts.
    */
   sendOtp: asyncHandler(async (req: Request, res: Response) => {
-    const { phone } = req.body as SendOtpInput;
-    await otpService.sendOtp(phone);
-    res.json(success({ sent: true }, "OTP sent to registered phone number."));
+    const { email } = req.body as SendOtpInput;
+    await otpService.sendOtpToEmail(email);
+    res.json(
+      success(
+        { sent: true },
+        "If that email is registered, a reset code is on its way.",
+      ),
+    );
   }),
 
   /**
    * POST /auth/verify-otp
    *
-   * A failed verification answers HTTP 200 with `data: null` and the reason in
-   * `message`. See KNOWN_ISSUES.md.
+   * A rejected code answers 401 with an `error` object, like every other
+   * failure in the API. It used to answer 200 with `data: null`, which meant a
+   * client checking the status code read a refusal as a success
+   * (KNOWN_ISSUES.md #1). Nothing called it before this change.
    */
   verifyOtp: asyncHandler(async (req: Request, res: Response) => {
     const result = await otpService.verifyOtp(req.body as VerifyOtpInput);
 
     if (!result.verified) {
-      res.json(success(null, result.message));
-      return;
+      throw new AuthError(result.message, "INVALID_OTP");
     }
 
     res.json(

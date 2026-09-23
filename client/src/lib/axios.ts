@@ -88,10 +88,27 @@ async function refreshAccessToken(): Promise<string | null> {
  * object persists separately, so the shell rendered while every panel came
  * back empty.
  */
+/**
+ * Public auth endpoints whose 401 means "those credentials are wrong", not
+ * "your session expired".
+ *
+ * Refreshing and replaying makes no sense for these — there is no session yet
+ * — and calling endSession() on them dumps the caller back at the login
+ * screen. That cost the password-reset flow: a mistyped code answered 401,
+ * and the interceptor threw the user out mid-reset instead of letting the
+ * form show the error.
+ */
+const CREDENTIAL_PATHS = ["/auth/login", "/auth/register", "/auth/verify-otp", "/auth/reset-password"];
+
 api.interceptors.response.use(
 	(response) => response,
 	async (error: unknown) => {
 		if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+			return Promise.reject(error);
+		}
+
+		const url = error.config?.url ?? "";
+		if (CREDENTIAL_PATHS.some((path) => url.includes(path))) {
 			return Promise.reject(error);
 		}
 

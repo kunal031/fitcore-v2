@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-import { emailSchema, lenientPhoneSchema, phoneSchema } from "./common.dto.js";
+import { emailSchema, phoneSchema } from "./common.dto.js";
 import { formatEmail, formatPhone, isValidEmail, isValidIndianPhone } from "../utils/phone.js";
 
 export const registerSchema = z.object({
@@ -59,19 +59,24 @@ export const changePasswordSchema = z.object({
 });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
+/**
+ * The three reset steps are keyed on email, because that is where the code is
+ * sent and the only identifier the person has typed. The phone stays internal:
+ * it remains the OTP record's key and the reset token's subject.
+ */
 export const sendOtpSchema = z.object({
-  phone: phoneSchema,
+  email: emailSchema,
 });
 export type SendOtpInput = z.infer<typeof sendOtpSchema>;
 
 export const verifyOtpSchema = z.object({
-  phone: lenientPhoneSchema,
+  email: emailSchema,
   otp: z.string().min(4).max(6),
 });
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
 
 export const resetPasswordSchema = z.object({
-  phone: lenientPhoneSchema,
+  email: emailSchema,
   reset_token: z.string().min(1),
   new_password: z.string().min(6).max(100),
 });

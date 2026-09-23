@@ -12,4 +12,5 @@ export { dashboardService } from "./dashboard.service.js";
 export { analyticsService } from "./analytics.service.js";
 export { razorpayService } from "./razorpay.service.js";
 export { settingService } from "./setting.service.js";
+export { emailService } from "./email.service.js";
 export * from "./mappers/index.js";
