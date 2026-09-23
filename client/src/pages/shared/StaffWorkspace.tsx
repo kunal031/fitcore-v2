@@ -1048,6 +1048,7 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
  * editable. Plan and coupon management stays with the Admin.
  */
 function CatalogueView() {
+	const [view, setView] = useState<"plans" | "offers">("plans");
 	const [plans, setPlans] = useState<Plan[]>([]);
 	const [coupons, setCoupons] = useState<Coupon[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -1081,13 +1082,36 @@ function CatalogueView() {
 
 	if (loading) return <div className="loading-state">Loading plans and offers...</div>;
 
+	const showingPlans = view === "plans";
+
 	return (
 		<section className="view-stack">
+			{/* One list at a time: a trainer looking up a price is not also
+			    looking up a discount code. */}
+			<nav className="section-jump" aria-label="Choose catalogue">
+				<button
+					className={showingPlans ? "jump-pill active" : "jump-pill"}
+					aria-current={showingPlans ? "true" : undefined}
+					onClick={() => setView("plans")}
+				>
+					Plans
+				</button>
+				<button
+					className={showingPlans ? "jump-pill" : "jump-pill active"}
+					aria-current={showingPlans ? undefined : "true"}
+					onClick={() => setView("offers")}
+				>
+					Offers
+				</button>
+			</nav>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{showingPlans ? (
+			<>
 			<div className="section-heading">
 				<div><p className="eyebrow">Catalogue</p><h2>Active plans</h2></div>
 			</div>
-
-			{error && <div className="error-message">{error}</div>}
 
 			{plans.length === 0 ? (
 				<div className="empty-state">No active plans right now.</div>
@@ -1110,9 +1134,11 @@ function CatalogueView() {
 				</div>
 			)}
 
+			</>
+			) : (
+			<>
 			<div className="section-heading">
 				<div><p className="eyebrow">Offers</p><h2>Running coupons</h2></div>
-				<span className="muted">{liveCoupons.length} live</span>
 			</div>
 
 			{liveCoupons.length === 0 ? (
@@ -1130,10 +1156,11 @@ function CatalogueView() {
 									{` · ${Math.max(0, coupon.max_uses - coupon.current_uses)} left`}
 								</small>
 							</div>
-							<span className="status-dot">Live</span>
 						</article>
 					))}
 				</div>
+			)}
+			</>
 			)}
 
 			<p className="muted catalogue-note">
@@ -1626,21 +1653,9 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 						aria-label="Search directory"
 					/>
 				</div>
-				{/* Creating accounts is owner-only on the backend, so the buttons
-				    are too — a trainer pressing them would only earn a 403. */}
-				{isAdmin && !creating && (
-					<button
-						className="primary-action compact-button"
-						onClick={() => { setCreating(showingTrainers ? "trainer" : "member"); setError(""); setNotice(""); }}
-					>
-						<UserPlus size={15} />
-						{showingTrainers ? "Add trainer" : "Add gym user"}
-					</button>
-				)}
-
-				{/* Filters share the toolbar so the controls that narrow the table
-				    sit together. Trainers have no plan and cannot be marked
-				    present, so the row only applies to gym users. */}
+				{/* Filters sit between the search and the create button, so the
+				    row reads narrow-then-act. Trainers have no plan and cannot be
+				    marked present, so the filters only apply to gym users. */}
 				{!showingTrainers && (
 					<div className="toolbar-filters">
 						<FilterPills
@@ -1658,13 +1673,25 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 							value={filters.presence}
 							onChange={(key) => filters.setPresence(key as PresenceFilter)}
 							options={[
-								{ key: "all", label: "Anyone", count: filters.counts.all },
+								{ key: "all", label: "All", count: filters.counts.all },
 								{ key: "absent", label: "Not present", count: filters.counts.absent },
 								{ key: "present", label: "Present", count: filters.counts.present },
 							]}
 						/>
 					</div>
 				)}
+				{/* Creating accounts is owner-only on the backend, so the buttons
+				    are too — a trainer pressing them would only earn a 403. */}
+				{isAdmin && !creating && (
+					<button
+						className="primary-action compact-button"
+						onClick={() => { setCreating(showingTrainers ? "trainer" : "member"); setError(""); setNotice(""); }}
+					>
+						<UserPlus size={15} />
+						{showingTrainers ? "Add trainer" : "Add gym user"}
+					</button>
+				)}
+
 			</div>
 
 			{error && <div className="error-message">{error}</div>}

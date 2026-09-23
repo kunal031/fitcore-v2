@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeIndianRupee, CalendarDays, ChevronLeft, ChevronRight, Download, CheckCircle2, CreditCard, Copy, Dumbbell, LogOut, Moon, Share2, Sparkles, Sun, Tag, Ticket, UserRound, Users } from "lucide-react";
+import { BadgeIndianRupee, CalendarDays, ChevronLeft, ChevronRight, Download, CheckCircle2, CreditCard, Dumbbell, LogOut, Moon, Share2, Sparkles, Sun, Tag, Ticket, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage, endSession } from "../../lib/axios";
 import { logout } from "../../services/authService";
@@ -10,6 +10,7 @@ import { getActiveSubscription, getSubscriptionHistory, type Subscription } from
 import { getMyProfile, updateMyProfile } from "../../services/userService";
 import { getMyPayments, initiatePayment, verifyMockPayment, type PaymentDetail, type PaymentInitiation } from "../../services/paymentService";
 import ConfirmDialog from "../../components/common/ConfirmDialog";
+import CopyButton from "../../components/common/CopyButton";
 import StaffWorkspace from "./StaffWorkspace";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { useAuthStore, type MemberProfile } from "../../store/authStore";
@@ -863,12 +864,7 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
     window.setTimeout(() => { jumpingRef.current = false; }, 700);
   }
 
-  async function copyCode() {
-    if (!referrals) return;
-    await navigator.clipboard?.writeText(referrals.my_referral_code);
-    setNotice("Referral code copied.");
-  }
-
+  /** Fallback for browsers without the share sheet. */
   async function copyLink() {
     if (!referrals) return;
     await navigator.clipboard?.writeText(shareLink);
@@ -926,8 +922,14 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
             <small>{shareLink}</small>
           </div>
           <div className="referral-actions">
-            <button className="icon-button" onClick={copyCode} aria-label="Copy referral code"><Copy size={18} /></button>
-            <button className="share-button" onClick={shareCode}>Share</button>
+            <CopyButton
+              value={referrals.my_referral_code}
+              className="icon-button"
+              title="Copy referral code"
+            />
+            <button className="icon-button share-button" onClick={shareCode} aria-label="Share referral link">
+              <Share2 size={18} />
+            </button>
           </div>
         </div>
         <div className="insight-grid">
@@ -981,15 +983,7 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
                       {coupon.min_plan_price_paise > 0 && ` · min ${money(coupon.min_plan_price_paise)}`}
                     </small>
                   </div>
-                  <button
-                    className="outline-button compact-button"
-                    onClick={async () => {
-                      await navigator.clipboard?.writeText(coupon.code);
-                      setNotice(`Coupon ${coupon.code} copied — apply it at checkout.`);
-                    }}
-                  >
-                    <Copy size={14} /> Copy
-                  </button>
+                  <CopyButton value={coupon.code} label="Copy" title={`Copy ${coupon.code}`} />
                 </article>
               ))}
             </div>
