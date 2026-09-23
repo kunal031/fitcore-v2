@@ -674,14 +674,27 @@ article.coupon-row > .outline-button { grid-column: 2; grid-row: 1 / span 2; ali
 .modal-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .modal-button-primary { border-color: transparent; color: var(--accent-ink); background: var(--accent); }
 
-/* Directory toolbar: search grows, the create button keeps its width. */
-.directory-toolbar { display: flex; align-items: center; gap: 10px; }
-.directory-toolbar .search-row { flex: 1; min-width: 0; }
+/* Directory toolbar: search grows, the create button keeps its width, and the
+   filters wrap onto their own line beneath both. */
+.directory-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.directory-toolbar .search-row { flex: 1; min-width: 220px; }
 .directory-toolbar .primary-action { flex-shrink: 0; }
+.toolbar-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-basis: 100%; }
 @media (max-width: 620px) {
-	.directory-toolbar { flex-wrap: wrap; }
 	.directory-toolbar .search-row { flex-basis: 100%; }
+	/* Each filter takes its own line, so a group is never split mid-row. */
+	.toolbar-filters { gap: 8px; }
+	.filter-group { width: 100%; }
 }
+
+/* Filter pills: compact, and each carries the size of the group it selects. */
+.filter-group { display: inline-flex; flex-wrap: wrap; gap: 6px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.filter-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 700; white-space: nowrap; transition: color .15s ease, background .15s ease; }
+.filter-pill:hover { color: var(--text); }
+.filter-pill.active { color: var(--accent-ink); background: var(--accent); }
+.filter-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filter-count { padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 12%, transparent); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.filter-pill.active .filter-count { background: color-mix(in srgb, var(--accent-ink) 18%, transparent); }
 
 /* Quota spent or paused: not a failure, but not good to go either. */
 .status-dot.warn { color: #e8b93f; }

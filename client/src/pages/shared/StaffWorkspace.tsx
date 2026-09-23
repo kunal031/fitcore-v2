@@ -183,6 +183,100 @@ export default function StaffWorkspace({
 	);
 }
 
+/* ── Filters ────────────────────────────────────────────────────────────── */
+
+/** Plan state, for narrowing a member list. */
+type PlanFilter = "all" | "active" | "no-plan";
+/** Whether today's attendance has been recorded. */
+type PresenceFilter = "all" | "present" | "absent";
+
+/**
+ * A compact row of filter pills.
+ *
+ * Each option carries its own count, so the size of a group is visible before
+ * it is selected — the point of the presence filter is knowing how many are
+ * still to mark, which a bare label would not tell you.
+ */
+function FilterPills({
+	label,
+	value,
+	options,
+	onChange,
+}: {
+	label: string;
+	value: string;
+	options: { key: string; label: string; count: number }[];
+	onChange: (key: string) => void;
+}) {
+	return (
+		<div className="filter-group" role="group" aria-label={label}>
+			{options.map((option) => (
+				<button
+					key={option.key}
+					className={value === option.key ? "filter-pill active" : "filter-pill"}
+					aria-pressed={value === option.key}
+					onClick={() => onChange(option.key)}
+				>
+					{option.label}
+					<span className="filter-count">{option.count}</span>
+				</button>
+			))}
+		</div>
+	);
+}
+
+/**
+ * Narrow a member list by plan state and by whether they are already marked
+ * present today.
+ *
+ * Presence is decided by the set of ids checked in today rather than by
+ * anything on the member, because attendance is charged per day: the first
+ * check-in of the day spends a visit and re-entry is free, so "present" means
+ * "appears in today's log", not a field on the record.
+ */
+function useMemberFilters(members: MemberListItem[], checkedInIds: Set<string>) {
+	const [plan, setPlan] = useState<PlanFilter>("all");
+	const [presence, setPresence] = useState<PresenceFilter>("all");
+
+	// Counts come from the unfiltered list, so each pill keeps showing the size
+	// of its own group rather than collapsing to zero once another is applied.
+	const counts = useMemo(() => {
+		let active = 0;
+		let noPlan = 0;
+		let present = 0;
+		for (const member of members) {
+			const status = member.subscription?.status ?? null;
+			if (status === "active") active += 1;
+			// No plan at all, or one that can no longer be used — either way the
+			// member cannot train, which is what the admin is looking for.
+			else noPlan += 1;
+			if (checkedInIds.has(member.id)) present += 1;
+		}
+		return {
+			all: members.length,
+			active,
+			noPlan,
+			present,
+			absent: members.length - present,
+		};
+	}, [members, checkedInIds]);
+
+	const filtered = useMemo(() => {
+		return members.filter((member) => {
+			const status = member.subscription?.status ?? null;
+			if (plan === "active" && status !== "active") return false;
+			if (plan === "no-plan" && status === "active") return false;
+
+			const isPresent = checkedInIds.has(member.id);
+			if (presence === "present" && !isPresent) return false;
+			if (presence === "absent" && isPresent) return false;
+			return true;
+		});
+	}, [members, checkedInIds, plan, presence]);
+
+	return { plan, setPlan, presence, setPresence, counts, filtered };
+}
+
 /* ── Paging ─────────────────────────────────────────────────────────────── */
 
 /** Rows shown per page in every gym-user and trainer listing. */
@@ -1348,28 +1442,27 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 	const [notice, setNotice] = useState("");
 	const [creating, setCreating] = useState<"member" | "trainer" | null>(null);
 	const [saving, setSaving] = useState(false);
-	// Members page on the server, which already caps and counts them.
-	const [page, setPage] = useState(1);
-	const [pages, setPages] = useState(1);
-
-	const load = useCallback(async (term: string, wanted: number) => {
+	const load = useCallback(async (term: string) => {
 		setLoading(true);
 		try {
 			// Today's check-ins drive the per-row attendance state. The member
 			// list carries each plan, so the table needs no per-row lookup.
+			//
+			// The whole matching set is fetched rather than one page: presence is
+			// only known on the client, so filtering and counting a single page
+			// would describe the page rather than the gym — "4 still to mark"
+			// would mean four on this page. Paging then happens locally.
 			const [result, todayList] = await Promise.all([
 				listMembers({
 					search: term,
 					role: "member",
-					page: wanted,
-					limit: PAGE_SIZE,
+					limit: 100,
 					includeSubscription: true,
 				}),
 				getTodayCheckIns(),
 			]);
 			setMembers(result.items);
 			setTotal(result.meta.total);
-			setPages(Math.max(1, result.meta.pages));
 			setScope(result.scope ?? "all");
 			setToday(todayList);
 			// GET /users/trainers is owner-only, so a trainer asking for it gets
@@ -1385,14 +1478,11 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 	}, [isAdmin]);
 
 	// Debounced so typing does not fire a request per keystroke. Also covers
-	// the first load and every page change, so there is one fetch path.
+	// the first load, so there is one fetch path.
 	useEffect(() => {
-		const timer = window.setTimeout(() => { void load(search.trim(), page); }, 350);
+		const timer = window.setTimeout(() => { void load(search.trim()); }, 350);
 		return () => window.clearTimeout(timer);
-	}, [search, page, load]);
-
-	// A narrower search can leave the current page past the end of the results.
-	useEffect(() => { setPage(1); }, [search]);
+	}, [search, load]);
 
 	const activeCount = members.filter((m) => m.gym_meta.membership_status === "active").length;
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
@@ -1408,6 +1498,8 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 		);
 	}, [trainers, search]);
 	const trainerPage = useClientPage(visibleTrainers);
+	const filters = useMemberFilters(members, checkedInIds);
+	const memberPage = useClientPage(filters.filtered);
 
 	/**
 	 * Create a gym user or a trainer.
@@ -1452,7 +1544,7 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 
 			setCreating(null);
 			// Trainers may have changed, so reload both lists.
-			await load(search.trim(), page);
+			await load(search.trim());
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
@@ -1545,6 +1637,34 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 						{showingTrainers ? "Add trainer" : "Add gym user"}
 					</button>
 				)}
+
+				{/* Filters share the toolbar so the controls that narrow the table
+				    sit together. Trainers have no plan and cannot be marked
+				    present, so the row only applies to gym users. */}
+				{!showingTrainers && (
+					<div className="toolbar-filters">
+						<FilterPills
+							label="Filter by plan"
+							value={filters.plan}
+							onChange={(key) => filters.setPlan(key as PlanFilter)}
+							options={[
+								{ key: "all", label: "All", count: filters.counts.all },
+								{ key: "active", label: "Active plan", count: filters.counts.active },
+								{ key: "no-plan", label: "No plan", count: filters.counts.noPlan },
+							]}
+						/>
+						<FilterPills
+							label="Filter by attendance"
+							value={filters.presence}
+							onChange={(key) => filters.setPresence(key as PresenceFilter)}
+							options={[
+								{ key: "all", label: "Anyone", count: filters.counts.all },
+								{ key: "absent", label: "Not present", count: filters.counts.absent },
+								{ key: "present", label: "Present", count: filters.counts.present },
+							]}
+						/>
+					</div>
+				)}
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
@@ -1612,8 +1732,12 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 						/>
 					</div>
 				)
-			) : members.length === 0 ? (
-				<div className="empty-state">No gym users matched your search.</div>
+			) : filters.filtered.length === 0 ? (
+				<div className="empty-state">
+					{members.length === 0
+						? "No gym users matched your search."
+						: "No gym users match these filters."}
+				</div>
 			) : (
 				<div className="table-wrap">
 					<table className="data-table">
@@ -1627,7 +1751,7 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 							</tr>
 						</thead>
 						<tbody>
-							{members.map((member) => {
+							{memberPage.slice.map((member) => {
 								const done = checkedInIds.has(member.id);
 								const plan = member.subscription;
 								const status = plan ? subscriptionStatusView(plan.status) : null;
@@ -1690,10 +1814,10 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 						</tbody>
 					</table>
 					<Pager
-						page={page}
-						pages={pages}
-						total={total}
-						onPage={setPage}
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
 						noun={scope === "assigned" ? "assigned members" : "gym users"}
 					/>
 				</div>
@@ -1896,7 +2020,19 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 		);
 	}, [trainers, search]);
 	const trainerPage = useClientPage(visibleTrainers);
-	const memberPage = useClientPage(members);
+
+	const [presence, setPresence] = useState<PresenceFilter>("all");
+	const presenceCounts = useMemo(() => {
+		const present = members.filter((m) => checkedInIds.has(m.id)).length;
+		return { all: members.length, present, absent: members.length - present };
+	}, [members, checkedInIds]);
+	const visibleMembers = useMemo(() => {
+		if (presence === "all") return members;
+		return members.filter((m) =>
+			presence === "present" ? checkedInIds.has(m.id) : !checkedInIds.has(m.id),
+		);
+	}, [members, checkedInIds, presence]);
+	const memberPage = useClientPage(visibleMembers);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1949,14 +2085,33 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 				</div>
 			)}
 
-			<div className="search-row">
-				<Search size={16} />
-				<input
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
-					aria-label="Search"
-				/>
+			<div className="directory-toolbar">
+				<div className="search-row">
+					<Search size={16} />
+					<input
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+						aria-label="Search"
+					/>
+				</div>
+				{/* Splits the list into who still needs marking and who is done.
+				    Staff hold no plan and cannot be checked in, so trainers are
+				    excluded. */}
+				{!showingTrainers && (
+					<div className="toolbar-filters">
+						<FilterPills
+							label="Filter by attendance"
+							value={presence}
+							onChange={(key) => setPresence(key as PresenceFilter)}
+							options={[
+								{ key: "all", label: "Everyone", count: presenceCounts.all },
+								{ key: "absent", label: "Not present", count: presenceCounts.absent },
+								{ key: "present", label: "Present", count: presenceCounts.present },
+							]}
+						/>
+					</div>
+				)}
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
@@ -2001,8 +2156,14 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 						</p>
 					</>
 				)
-			) : members.length === 0 ? (
-				<div className="empty-state">No gym users matched your search.</div>
+			) : visibleMembers.length === 0 ? (
+				<div className="empty-state">
+					{members.length === 0
+						? "No gym users matched your search."
+						: presence === "absent"
+							? "Everyone here has been marked present today."
+							: "Nobody here has been marked present yet."}
+				</div>
 			) : (
 				<div className="table-wrap">
 					<table className="data-table">
