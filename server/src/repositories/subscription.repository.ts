@@ -1,12 +1,15 @@
 /**
  * Subscription queries.
  *
- * Calendar dates are stored as `YYYY-MM-DD` strings, which compare correctly
- * with `$lt`/`$gte` because the format is lexicographically ordered.
+ * Calendar dates (`starts_on`, `expires_on`) are stored two ways: Node-era
+ * records hold `YYYY-MM-DD` strings, Python-era ones hold BSON dates. Any
+ * range filter on them goes through `calendarDateRangeFilter`, which matches
+ * both forms — a bound of one form silently skips the other.
  */
 import type { Types } from "mongoose";
 
 import { SUBSCRIPTION_STATUS } from "../config/constants.js";
+import { calendarDateRangeFilter } from "../utils/date.js";
 import {
   Subscription,
   type ISubscription,
@@ -41,27 +44,56 @@ export const subscriptionRepository = {
     return Subscription.create(data);
   },
 
-  /** Active subscriptions expiring between today and `targetDate`, inclusive. */
-  listExpiringBetween(today: string, targetDate: string): Promise<SubscriptionDoc[]> {
-    return Subscription.find({
-      status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $gte: today, $lte: targetDate },
-    }).exec();
+  /**
+   * Active subscriptions expiring between today and `targetDate`, inclusive.
+   *
+   * Goes through the raw driver to find the matching ids, then re-reads them
+   * as documents: the mixed-form bounds cannot survive Mongoose's casting, but
+   * callers still expect hydrated documents.
+   */
+  async listExpiringBetween(
+    today: string,
+    targetDate: string,
+  ): Promise<SubscriptionDoc[]> {
+    const ids = await this.idsExpiringBetween(today, targetDate);
+    if (ids.length === 0) return [];
+    return Subscription.find({ _id: { $in: ids } }).exec();
   },
 
   countExpiringBetween(today: string, targetDate: string): Promise<number> {
-    return Subscription.countDocuments({
+    return Subscription.collection.countDocuments({
       status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $gte: today, $lte: targetDate },
-    }).exec();
+      ...calendarDateRangeFilter("expires_on", { gte: today, lte: targetDate }),
+    });
+  },
+
+  /** Ids only, for callers that re-read or count rather than hydrate. */
+  async idsExpiringBetween(today: string, targetDate: string): Promise<Types.ObjectId[]> {
+    const rows = await Subscription.collection
+      .find(
+        {
+          status: SUBSCRIPTION_STATUS.ACTIVE,
+          ...calendarDateRangeFilter("expires_on", { gte: today, lte: targetDate }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .toArray();
+    return rows.map((row) => row._id as Types.ObjectId);
   },
 
   /** Active subscriptions whose window has already closed. Drives the nightly sweep. */
-  listCalendarExpired(today: string): Promise<SubscriptionDoc[]> {
-    return Subscription.find({
-      status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $lt: today },
-    }).exec();
+  async listCalendarExpired(today: string): Promise<SubscriptionDoc[]> {
+    const rows = await Subscription.collection
+      .find(
+        {
+          status: SUBSCRIPTION_STATUS.ACTIVE,
+          ...calendarDateRangeFilter("expires_on", { lt: today }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .toArray();
+    if (rows.length === 0) return [];
+    return Subscription.find({ _id: { $in: rows.map((row) => row._id) } }).exec();
   },
 
   countByStatus(status: string): Promise<number> {
