@@ -577,10 +577,6 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 .chart-axis-caption { margin: 2px 0 0; color: var(--muted); font-size: 11.5px; text-align: center; }
 
 /* A table view, so the numbers are readable without relying on the bars. */
-.chart-table { margin-top: 2px; }
-.chart-table summary { padding: 8px 0; color: var(--accent); font-size: 13px; font-weight: 700; cursor: pointer; }
-.chart-table summary::marker { color: var(--muted); }
-.chart-table .detail-list { margin-top: 6px; }
 
 .analytics-note { margin: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
 
@@ -688,3 +684,30 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 /* Secondary line inside a table cell — a phone under a name, the two
    subscription axes under a status. */
 .cell-sub { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+
+/* Settings: radio and checkbox rows that read as pickable cards. */
+.choice-list { display: grid; gap: 8px; }
+.choice { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.choice:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.choice.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.choice input { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--accent); }
+.choice > span { display: grid; gap: 2px; }
+.choice .cell-sub { margin-top: 0; }
+/* Still operable, but visibly not in play while a wider policy covers it. */
+.choice-muted { opacity: .5; }
+
+/* Settings sits at the foot of the sidebar, away from the daily tabs. */
+@media (min-width: 900px) {
+	.app-nav .nav-item-last { margin-top: auto; }
+}
+
+/* Graph/Table switch, sitting in the chart's heading row. */
+.view-toggle { display: inline-flex; flex-shrink: 0; gap: 6px; }
+.view-toggle .jump-pill { padding: 6px 13px; font-size: 12px; }
+
+/* Counts and money line up on the right, so magnitudes compare down a column. */
+.data-table th.num, .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+	/* Stacked into cards, a right-aligned value would drift from its label. */
+	.data-table td.num { text-align: right; }
+}
