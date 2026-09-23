@@ -1,0 +1,41 @@
+# Render blueprint for the FitCore API.
+#
+# Committing this lets Render create the service from the repo instead of
+# configuring it by hand, and documents exactly how the service is built.
+# Secrets are marked sync:false so they are entered in the dashboard and never
+# live in git.
+services:
+  - type: web
+    name: fitcore-api
+    runtime: node
+    # The service lives in a subdirectory of the repo.
+    rootDir: server
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Set these in the Render dashboard ──────────────────────────────
+      # MongoDB Atlas connection string, with the password percent-encoded.
+      - key: MONGODB_URI
+        sync: false
+      - key: DATABASE_NAME
+        value: fitcore_db
+      # Generate with: openssl rand -hex 32
+      - key: JWT_SECRET_KEY
+        sync: false
+      # Comma-separated frontend origins, e.g. https://fitcore.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      # Leave as the placeholders to keep the gateway mocked.
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
