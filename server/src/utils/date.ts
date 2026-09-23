@@ -53,11 +53,18 @@ export function toCalendarDateStr(value: unknown): string | null {
 /**
  * Build a filter matching a calendar-date field stored in either form.
  *
- * `starts_on`, `expires_on`, `joined_on` and `dob` hold `YYYY-MM-DD` strings on
- * Node-era records but BSON dates on Python-era ones. MongoDB orders values of
- * different BSON types by type rather than by value, so a bound of one form
- * silently skips every document holding the other — the query returns no error,
- * just a wrong answer. Both forms therefore have to be matched explicitly.
+ * `npm run normalize-dates` has converted every stored calendar date to a
+ * `YYYY-MM-DD` string, and the Node server only ever writes that form, so a
+ * plain string bound is correct against a current database. This helper stays
+ * because nothing guarantees the database a given deployment points at has been
+ * migrated: a restored backup, an untouched environment or an import from the
+ * Python-era server can all reintroduce BSON dates.
+ *
+ * It matters because MongoDB orders values of different BSON types by type
+ * rather than by value, so a bound of one form silently skips every document
+ * holding the other — no error, just a wrong answer. That failure mode is
+ * invisible in review and has already cost three bugs, so the cost of matching
+ * both forms is worth paying on the few queries that range over these fields.
  *
  * `$type` pins each branch to the form its bounds are written in, so a string
  * bound can never be compared against a date document or vice versa.

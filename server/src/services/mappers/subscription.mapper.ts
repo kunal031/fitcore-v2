@@ -9,8 +9,8 @@ import type { SubscriptionRead } from "../../dtos/subscription.dto.js";
 import { daysBetween, getTodayStr, toCalendarDateStr } from "../../utils/date.js";
 
 export function toSubscriptionRead(sub: SubscriptionDoc): SubscriptionRead {
-  // Older documents hold BSON dates here rather than `YYYY-MM-DD` strings,
-  // so both are normalised before any arithmetic.
+  // Normalised before any arithmetic: a migrated database holds strings, an
+  // unmigrated one can still hold BSON dates.
   const today = getTodayStr();
   const startsOn = toCalendarDateStr(sub.starts_on) ?? today;
   const expiresOn = toCalendarDateStr(sub.expires_on) ?? today;

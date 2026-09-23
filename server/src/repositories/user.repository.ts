@@ -100,16 +100,14 @@ export const userRepository = {
   /**
    * Members who joined on or after the given calendar date.
    *
-   * `joined_on` is stored two ways: current records hold a YYYY-MM-DD
-   * string, while those created under an earlier schema hold a BSON
-   * date. MongoDB
-   * compares across BSON types by type order, so a single `$gte` matches only
-   * one of them — a string bound silently skips every date record, and the
-   * count came back near zero.
+   * Matches `joined_on` in both stored forms. A migrated database holds only
+   * strings, but an unmigrated one can still hold BSON dates, and MongoDB
+   * compares across BSON types by type order — so a string bound alone would
+   * silently skip every date record and the count would come back near zero.
    *
    * The query goes through the raw driver because the schema declares this
    * field a string, so Mongoose would cast the Date bound back to a string
-   * and reintroduce the mismatch.
+   * and reintroduce the mismatch. See `calendarDateRangeFilter`.
    */
   countMembersJoinedSince(dateStr: string): Promise<number> {
     return User.collection.countDocuments({
