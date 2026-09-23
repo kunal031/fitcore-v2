@@ -938,6 +938,36 @@ function Detail({ label, value }: { label: string; value: string }) {
  * Opening a row shows that member's profile rather than navigating away, so
  * returning to the list keeps the search term.
  */
+/**
+ * How a subscription status reads in the member table.
+ *
+ * A plan ends on two independent axes and the difference matters to whoever is
+ * on the floor: `expired` means the calendar window closed, `exhausted` means
+ * the visit quota ran out while the window is still open. Collapsing them into
+ * one "inactive" would tell a trainer the wrong thing about why someone cannot
+ * train, so each keeps its own label and tone.
+ */
+const SUBSCRIPTION_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
+	active: { label: "Active", tone: "status-dot" },
+	// Quota spent, calendar window still open — a renewal conversation, not a
+	// failure, so it reads as a warning rather than in the danger colour.
+	exhausted: { label: "Visits used up", tone: "status-dot warn" },
+	expired: { label: "Expired", tone: "status-dot failed" },
+	cancelled: { label: "Cancelled", tone: "status-dot failed" },
+	paused: { label: "Paused", tone: "status-dot warn" },
+};
+
+function subscriptionStatusView(status: string) {
+	return (
+		SUBSCRIPTION_STATUS_LABELS[status] ?? {
+			// An unrecognised status still shows its raw value rather than being
+			// silently swallowed into one of the known states.
+			label: status,
+			tone: "status-dot warn",
+		}
+	);
+}
+
 interface NewAccountForm {
 	full_name: string;
 	phone: string;
@@ -1152,32 +1182,50 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 
 	return (
 		<section className="view-stack">
-			<nav className="section-jump" aria-label="Choose directory">
-				<button
-					className={showingTrainers ? "jump-pill" : "jump-pill active"}
-					aria-current={showingTrainers ? undefined : "true"}
-					onClick={() => { setAudience("members"); setCreating(null); }}
-				>
-					Gym users
-				</button>
-				<button
-					className={showingTrainers ? "jump-pill active" : "jump-pill"}
-					aria-current={showingTrainers ? "true" : undefined}
-					onClick={() => { setAudience("trainers"); setCreating(null); }}
-				>
-					Trainers
-				</button>
-			</nav>
+			{/* Choosing an audience is an admin affordance: a trainer manages
+			    people, not the trainer roster, so they go straight to their
+			    members. */}
+			{isAdmin && (
+				<nav className="section-jump" aria-label="Choose directory">
+					<button
+						className={showingTrainers ? "jump-pill" : "jump-pill active"}
+						aria-current={showingTrainers ? undefined : "true"}
+						onClick={() => { setAudience("members"); setCreating(null); }}
+					>
+						Gym users
+					</button>
+					<button
+						className={showingTrainers ? "jump-pill active" : "jump-pill"}
+						aria-current={showingTrainers ? "true" : undefined}
+						onClick={() => { setAudience("trainers"); setCreating(null); }}
+					>
+						Trainers
+					</button>
+				</nav>
+			)}
 
 			<div className="insight-grid">
 				<article className="insight-card accent-card">
 					<Users size={19} />
 					<strong>{showingTrainers ? trainers.length : total}</strong>
-					<span>{showingTrainers ? "trainers" : "gym users"}</span>
+					{/* A scoped trainer sees only their own people; saying so stops a
+					    short list reading as a missing one. */}
+					<span>
+						{showingTrainers
+							? "trainers"
+							: scope === "assigned"
+								? "members assigned to you"
+								: "gym users"}
+					</span>
 				</article>
 				{!showingTrainers && (
 					<article className="insight-card">
 						<CalendarCheck size={19} /><strong>{activeCount}</strong><span>active now</span>
+					</article>
+				)}
+				{!showingTrainers && (
+					<article className="insight-card">
+						<Clock size={19} /><strong>{checkedInIds.size}</strong><span>present today</span>
 					</article>
 				)}
 			</div>
@@ -1269,11 +1317,26 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 				<div className="table-wrap">
 					<table className="data-table">
 						<thead>
-							<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
+							{/* The plan and its status replace phone and email here: on the
+							    floor, whether someone may train matters more than how to
+							    contact them. Both come from the list response, so no row
+							    costs an extra request. */}
+							<tr>
+								<th>Member ID</th>
+								<th>Name</th>
+								<th>Plan bought</th>
+								<th>Subscription</th>
+								<th>Attendance</th>
+							</tr>
 						</thead>
 						<tbody>
 							{members.map((member) => {
 								const done = checkedInIds.has(member.id);
+								const plan = member.subscription;
+								const status = plan ? subscriptionStatusView(plan.status) : null;
+								// Check-in is refused without a live plan, so the button is
+								// offered only when it can actually succeed.
+								const canTrain = plan?.status === "active";
 								return (
 									// The row opens the profile; the attendance cell stops the
 									// click so marking present never navigates away.
@@ -1291,14 +1354,32 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 										role="button"
 										aria-label={`Open ${member.full_name}`}
 									>
-										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
-										<td data-label="Name"><strong>{member.full_name}</strong></td>
-										<td data-label="Phone">{member.phone}</td>
-										<td data-label="Email">{member.email ?? "—"}</td>
+										<td data-label="Member ID"><code className="row-id">{shortId(member.id)}</code></td>
+										<td data-label="Name">
+											<strong>{member.full_name}</strong>
+											<span className="cell-sub">{member.phone}</span>
+										</td>
+										<td data-label="Plan bought">
+											{plan ? plan.plan_name : <span className="muted">No plan</span>}
+										</td>
+										<td data-label="Subscription">
+											{plan && status ? (
+												<>
+													<span className={status.tone}>{status.label}</span>
+													{/* Both axes, because either can be the one that
+													    ends the plan and they are different numbers. */}
+													<span className="cell-sub">
+														{plan.days_remaining} {plan.days_remaining === 1 ? "visit" : "visits"} · {plan.days_until_expiry}d left
+													</span>
+												</>
+											) : (
+												<span className="muted">—</span>
+											)}
+										</td>
 										<td data-label="Attendance" onClick={(event) => event.stopPropagation()}>
 											{done ? (
 												<span className="status-dot">Present today</span>
-											) : (
+											) : canTrain ? (
 												<button
 													className="outline-button compact-button"
 													onClick={() => mark(member)}
@@ -1306,6 +1387,8 @@ function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMe
 												>
 													{markingId === member.id ? "Marking..." : "Mark attendance"}
 												</button>
+											) : (
+												<span className="muted" title="Check-in needs a live plan">Needs a plan</span>
 											)}
 										</td>
 									</tr>

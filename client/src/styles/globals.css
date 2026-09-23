@@ -680,3 +680,11 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 	.directory-toolbar { flex-wrap: wrap; }
 	.directory-toolbar .search-row { flex-basis: 100%; }
 }
+
+/* Quota spent or paused: not a failure, but not good to go either. */
+.status-dot.warn { color: #e8b93f; }
+:root[data-theme="light"] .status-dot.warn { color: #9a6f00; }
+
+/* Secondary line inside a table cell — a phone under a name, the two
+   subscription axes under a status. */
+.cell-sub { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
