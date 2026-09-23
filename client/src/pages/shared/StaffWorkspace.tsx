@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BadgePercent, CalendarCheck, ChartColumnBig as ChartBar, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
+import { BadgePercent, CalendarCheck, ChartColumnBig as ChartBar, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserPlus, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage } from "../../lib/axios";
 import {
@@ -28,6 +28,8 @@ import {
 	type TrainerDashboard,
 } from "../../services/checkinService";
 import {
+	assignTrainer,
+	createUser,
 	getMyProfile,
 	getUserById,
 	listMembers,
@@ -141,7 +143,7 @@ export default function StaffWorkspace({
 					{tab === "members" && (
 						selectedMemberId
 							? <MemberDetail memberId={selectedMemberId} onBack={() => setSelectedMemberId(null)} />
-							: <MemberDirectory onOpenMember={setSelectedMemberId} />
+							: <MemberDirectory isAdmin={isAdmin} onOpenMember={setSelectedMemberId} />
 					)}
 					{tab === "attendance" && <AttendanceRecorder isAdmin={isAdmin} />}
 					{tab === "analytics" && isAdmin && <AnalyticsView />}
@@ -936,38 +938,130 @@ function Detail({ label, value }: { label: string; value: string }) {
  * Opening a row shows that member's profile rather than navigating away, so
  * returning to the list keeps the search term.
  */
-function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void }) {
+interface NewAccountForm {
+	full_name: string;
+	phone: string;
+	password: string;
+	email: string;
+	/** Only used when creating a gym user; trainers take no assignment. */
+	trainer_id: string;
+}
+
+const emptyAccountForm: NewAccountForm = {
+	full_name: "",
+	phone: "",
+	password: "",
+	email: "",
+	trainer_id: "",
+};
+
+/**
+ * Create a gym user or a trainer.
+ *
+ * One component for both, because the fields differ only by the trainer
+ * dropdown — which exists for gym users alone. Assignment runs one way, from
+ * the gym user's side, so there is no "add members to this trainer" flow here.
+ */
+function NewAccountForm({
+	role,
+	trainers,
+	saving,
+	onSubmit,
+	onCancel,
+}: {
+	role: "member" | "trainer";
+	trainers: TrainerListItem[];
+	saving: boolean;
+	onSubmit: (form: NewAccountForm) => void;
+	onCancel: () => void;
+}) {
+	const [form, setForm] = useState<NewAccountForm>(emptyAccountForm);
+	const isMember = role === "member";
+	const change = (key: keyof NewAccountForm) =>
+		(event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+			setForm((current) => ({ ...current, [key]: event.target.value }));
+
+	return (
+		<article className="staff-form">
+			<h3>{isMember ? "Add gym user" : "Add trainer"}</h3>
+			<div className="profile-form-grid">
+				<div className="field">
+					<label>Full name</label>
+					<input value={form.full_name} onChange={change("full_name")} placeholder="Anita Sharma" />
+				</div>
+				<div className="field">
+					<label>Phone</label>
+					<input value={form.phone} onChange={change("phone")} placeholder="+919876543210" />
+				</div>
+				<div className="field">
+					<label>Password</label>
+					<input type="password" value={form.password} onChange={change("password")} placeholder="At least 6 characters" />
+				</div>
+				<div className="field">
+					<label>Email <span className="optional-label">optional</span></label>
+					<input type="email" value={form.email} onChange={change("email")} placeholder="anita@example.com" />
+				</div>
+				{isMember && (
+					<div className="field">
+						<label>Trainer <span className="optional-label">optional</span></label>
+						<select value={form.trainer_id} onChange={change("trainer_id")}>
+							<option value="">No trainer yet</option>
+							{trainers.map((trainer) => (
+								<option key={trainer.id} value={trainer.id}>{trainer.full_name}</option>
+							))}
+						</select>
+					</div>
+				)}
+			</div>
+			<div className="form-actions">
+				<button className="primary-action" onClick={() => onSubmit(form)} disabled={saving}>
+					{saving ? "Saving..." : isMember ? "Add gym user" : "Add trainer"}
+				</button>
+				<button className="outline-button" onClick={onCancel} disabled={saving}>Cancel</button>
+			</div>
+		</article>
+	);
+}
+
+function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMember: (id: string) => void }) {
 	const [audience, setAudience] = useState<"members" | "trainers">("members");
 	const [members, setMembers] = useState<MemberListItem[]>([]);
 	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
 	const [today, setToday] = useState<TodayCheckIn[]>([]);
 	const [total, setTotal] = useState(0);
+	const [scope, setScope] = useState<"all" | "assigned">("all");
 	const [search, setSearch] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [markingId, setMarkingId] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
+	const [creating, setCreating] = useState<"member" | "trainer" | null>(null);
+	const [saving, setSaving] = useState(false);
 
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
 		try {
-			// Today's check-ins drive the per-row attendance state.
-			const [result, trainerList, todayList] = await Promise.all([
-				listMembers({ search: term, role: "member", limit: 100 }),
-				listTrainers(),
+			// Today's check-ins drive the per-row attendance state. The member
+			// list carries each plan, so the table needs no per-row lookup.
+			const [result, todayList] = await Promise.all([
+				listMembers({ search: term, role: "member", limit: 100, includeSubscription: true }),
 				getTodayCheckIns(),
 			]);
 			setMembers(result.items);
 			setTotal(result.meta.total);
-			setTrainers(trainerList);
+			setScope(result.scope ?? "all");
 			setToday(todayList);
+			// GET /users/trainers is owner-only, so a trainer asking for it gets
+			// a 403 that would blank the whole directory. Trainers have no
+			// trainer tab and no assignment dropdown, so they simply skip it.
+			setTrainers(isAdmin ? await listTrainers() : []);
 			setError("");
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [isAdmin]);
 
 	useEffect(() => { void load(""); }, [load]);
 
@@ -991,6 +1085,57 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 		);
 	}, [trainers, search]);
 
+	/**
+	 * Create a gym user or a trainer.
+	 *
+	 * A gym user may optionally be pointed at a trainer, which is a second call
+	 * — the create endpoint takes no trainer. If that second call fails the
+	 * account still exists, so the message says so rather than implying nothing
+	 * happened.
+	 */
+	async function createAccount(form: NewAccountForm, role: "member" | "trainer") {
+		const name = form.full_name.trim();
+		// Mirrors the backend rule: 10 digits starting 6-9, optional +91, with
+		// spaces, dashes and a leading 0 normalised away. Checking the same
+		// thing here turns a round-trip 422 into an immediate message.
+		const phone = form.phone.replace(/[\s\-()]/g, "");
+		if (name.length < 2) return setError("Enter a name of at least 2 characters.");
+		if (!/^(\+91)?[6-9]\d{9}$/.test(phone.replace(/^0(?=\d{10}$)/, ""))) {
+			return setError("Enter a valid 10-digit Indian mobile number, starting 6-9.");
+		}
+		if (form.password.length < 6) return setError("Password must be at least 6 characters.");
+
+		setSaving(true); setError(""); setNotice("");
+		try {
+			const created = await createUser({
+				full_name: name,
+				phone,
+				password: form.password,
+				role,
+				email: form.email.trim() || undefined,
+			});
+
+			if (role === "member" && form.trainer_id) {
+				try {
+					await assignTrainer(created.id, form.trainer_id);
+					setNotice(`${name} added and assigned to their trainer.`);
+				} catch (assignError) {
+					setNotice(`${name} was created, but assigning the trainer failed: ${apiErrorMessage(assignError)}`);
+				}
+			} else {
+				setNotice(`${name} added.`);
+			}
+
+			setCreating(null);
+			// Trainers may have changed, so reload both lists.
+			await load(search.trim());
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setSaving(false);
+		}
+	}
+
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
 		try {
@@ -1011,14 +1156,14 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 				<button
 					className={showingTrainers ? "jump-pill" : "jump-pill active"}
 					aria-current={showingTrainers ? undefined : "true"}
-					onClick={() => setAudience("members")}
+					onClick={() => { setAudience("members"); setCreating(null); }}
 				>
 					Gym users
 				</button>
 				<button
 					className={showingTrainers ? "jump-pill active" : "jump-pill"}
 					aria-current={showingTrainers ? "true" : undefined}
-					onClick={() => setAudience("trainers")}
+					onClick={() => { setAudience("trainers"); setCreating(null); }}
 				>
 					Trainers
 				</button>
@@ -1037,18 +1182,44 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 				)}
 			</div>
 
-			<div className="search-row">
-				<Search size={16} />
-				<input
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
-					aria-label="Search directory"
-				/>
+			<div className="directory-toolbar">
+				<div className="search-row">
+					<Search size={16} />
+					<input
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+						aria-label="Search directory"
+					/>
+				</div>
+				{/* Creating accounts is owner-only on the backend, so the buttons
+				    are too — a trainer pressing them would only earn a 403. */}
+				{isAdmin && !creating && (
+					<button
+						className="primary-action compact-button"
+						onClick={() => { setCreating(showingTrainers ? "trainer" : "member"); setError(""); setNotice(""); }}
+					>
+						<UserPlus size={15} />
+						{showingTrainers ? "Add trainer" : "Add gym user"}
+					</button>
+				)}
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
+
+			{isAdmin && creating && (
+				<NewAccountForm
+					// Remount on role change so switching tabs mid-entry starts clean
+					// rather than carrying a half-filled member form into the trainer one.
+					key={creating}
+					role={creating}
+					trainers={trainers}
+					saving={saving}
+					onSubmit={(form) => void createAccount(form, creating)}
+					onCancel={() => { setCreating(null); setError(""); }}
+				/>
+			)}
 
 			{loading ? (
 				<div className="loading-state">Loading directory...</div>
