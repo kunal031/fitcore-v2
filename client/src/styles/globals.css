@@ -1,15 +1,9 @@
 :root {
-	font-family: "Avenir Next", "Trebuchet MS", sans-serif;
-	color: #17324d;
-	background: #f4f7f5;
-	font-synthesis: none;
-	text-rendering: optimizeLegibility;
-}
-
-:root {
 	font-family: "Avenir Next", "DM Sans", sans-serif;
 	color: #f1f5f4;
-	background: #111516;
+	/* Declared after the custom properties below, in the html rule, so the
+	   canvas follows the active theme rather than being pinned to the dark
+	   literal this used to hold. */
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
 	--bg: #111516;
@@ -26,6 +20,13 @@
 :root { --header-h: 67px; --sidebar-w: 216px; }
 :root[data-theme="light"] { --bg: #f3f6f2; --surface: #ffffff; --surface-raised: #e8eee8; --line: rgba(20, 31, 30, .12); --text: #17211f; --muted: #60706c; --accent: #78ad00; --accent-ink: #fff; --danger: #b53e36; }
 * { box-sizing: border-box; }
+/* The canvas behind the document takes its colour from `html`, not `body`.
+   Without it, flicking past the top on macOS rubber-banded the page away and
+   exposed the browser's own base colour — a black band above a dark theme.
+   `overscroll-behavior-y` stops that bounce happening at all; the background
+   stays as the backstop, since the sidebar and nav are fixed and would
+   otherwise detach from the page as it slid. */
+html { background: var(--bg); color: var(--text); overscroll-behavior-y: none; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
 button, input { font: inherit; }
 button { cursor: pointer; }
@@ -101,7 +102,9 @@ h3 { margin-bottom: 7px; }
 .primary-action { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px; border: 0; border-radius: 12px; color: var(--accent-ink); background: var(--accent); font-weight: 900; }.primary-action:disabled { cursor: wait; opacity: .55; }
 .success-panel { max-width: 620px; padding: 28px 24px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); border-radius: 20px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }.success-mark { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 16px; border-radius: 50%; color: var(--accent-ink); background: var(--accent); font-size: 30px; font-weight: 900; }.success-panel h1 { margin-bottom: 12px; }
 .current-plan h3 { margin-top: 8px; font-size: 19px; }.current-plan p { margin-bottom: 0; color: var(--muted); }.current-plan > strong { font-size: 24px; }
-.status-dot { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; font-weight: 800; }.status-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+/* The label carries the state on its own; the leading dot only repeated it in
+   colour, and stacked up visually wherever several rows were listed. */
+.status-dot { display: inline-flex; align-items: center; color: var(--accent); font-size: 12px; font-weight: 800; }
 .plan-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }.plan-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }.plan-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.plan-card-top > strong { font-size: 19px; }.plan-card h3 { margin: 12px 0 6px; font-size: 18px; }.plan-card p { margin-bottom: 10px; color: var(--muted); font-size: 13.5px; line-height: 1.45; }.plan-meta { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }.plan-card ul { margin: 10px 0 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.65; }.outline-button { width: 100%; margin-top: 12px; color: var(--accent); }
 .history-list, .detail-list { display: grid; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface); }.history-row, .detail-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 15px; border-bottom: 1px solid var(--line); }.history-row:last-child, .detail-row:last-child { border-bottom: 0; }.history-row div { display: grid; gap: 3px; }.history-row > strong { font-size: 15px; }
 .attendance-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }.attendance-summary div { display: grid; gap: 5px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }.attendance-summary strong { font-size: 26px; }
@@ -223,13 +226,19 @@ h3 { margin-bottom: 7px; }
 .staff-form { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
 .staff-form h3 { margin: 0; font-size: 17px; }
 .staff-form select { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--bg); }
-.form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+/* .outline-button is full-width inside a plan card; in a form's action row it
+   should size to its label and sit beside the primary button. */
+.form-actions .outline-button { width: auto; margin-top: 0; padding: 12px 18px; }
 
 .search-row { display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--muted); }
 .search-row input { flex: 1; min-width: 0; padding: 13px 0; border: 0; outline: none; color: var(--text); background: none; }
 
 .plan-card.inactive { opacity: .62; }
-article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+/* Code and meta on the left, the one action on the right, so the row has no
+   dead space now that the status tag no longer balances it. */
+article.coupon-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 12px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+article.coupon-row > .outline-button { grid-column: 2; grid-row: 1 / span 2; align-self: center; width: auto; margin: 0; }
 .coupon-row-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .coupon-row-main > div { display: grid; gap: 3px; }
 .coupon-row-main strong { font-size: 16px; letter-spacing: .06em; }
@@ -574,10 +583,6 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 .chart-axis-caption { margin: 2px 0 0; color: var(--muted); font-size: 11.5px; text-align: center; }
 
 /* A table view, so the numbers are readable without relying on the bars. */
-.chart-table { margin-top: 2px; }
-.chart-table summary { padding: 8px 0; color: var(--accent); font-size: 13px; font-weight: 700; cursor: pointer; }
-.chart-table summary::marker { color: var(--muted); }
-.chart-table .detail-list { margin-top: 6px; }
 
 .analytics-note { margin: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
 
@@ -658,3 +663,90 @@ article.coupon-row { display: grid; gap: 8px; padding: 14px; border: 1px solid v
 .insight-card-button { color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
 .insight-card-button:hover { border-color: var(--accent); transform: translateY(-1px); }
 .insight-card-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Confirmation modal. Sits above the sticky header (z-index 6) and the nav. */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, #000 55%, transparent); backdrop-filter: blur(3px); }
+.modal-card { display: grid; gap: 10px; width: min(100%, 380px); padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 18px 48px rgba(0, 0, 0, .35); }
+.modal-card h2 { margin: 0; font-size: 19px; }
+.modal-card p { margin: 0; font-size: 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 6px; }
+.modal-button { padding: 10px 18px; border: 1px solid var(--line); border-radius: 11px; color: var(--text); background: var(--surface-raised); font-weight: 800; }
+.modal-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.modal-button-primary { border-color: transparent; color: var(--accent-ink); background: var(--accent); }
+
+/* Directory toolbar: search, filters and the create button share one row.
+   Search is the only part that gives up space, so the filters keep their
+   labels and counts rather than being squeezed. */
+.directory-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.directory-toolbar .search-row { flex: 1 1 180px; min-width: 150px; }
+.directory-toolbar .primary-action { flex-shrink: 0; }
+.toolbar-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Below this the row cannot hold everything legibly, so each control takes a
+   full line rather than a group being split mid-row. */
+@media (max-width: 1100px) {
+	.directory-toolbar .search-row { flex-basis: 100%; }
+}
+@media (max-width: 620px) {
+	.filter-group { width: 100%; }
+	.toolbar-filters { flex-basis: 100%; }
+	.directory-toolbar .primary-action { width: 100%; justify-content: center; }
+}
+
+/* Filter pills: compact, and each carries the size of the group it selects. */
+.filter-group { display: inline-flex; flex-wrap: wrap; gap: 6px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.filter-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 700; white-space: nowrap; transition: color .15s ease, background .15s ease; }
+.filter-pill:hover { color: var(--text); }
+.filter-pill.active { color: var(--accent-ink); background: var(--accent); }
+.filter-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filter-count { padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 12%, transparent); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.filter-pill.active .filter-count { background: color-mix(in srgb, var(--accent-ink) 18%, transparent); }
+
+/* Quota spent or paused: not a failure, but not good to go either. */
+.status-dot.warn { color: #e8b93f; }
+:root[data-theme="light"] .status-dot.warn { color: #9a6f00; }
+
+/* Secondary line inside a table cell — a phone under a name, the two
+   subscription axes under a status. */
+.cell-sub { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+
+/* Settings: radio and checkbox rows that read as pickable cards. */
+.choice-list { display: grid; gap: 8px; }
+.choice { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.choice:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.choice.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.choice input { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--accent); }
+.choice > span { display: grid; gap: 2px; }
+.choice .cell-sub { margin-top: 0; }
+/* Still operable, but visibly not in play while a wider policy covers it. */
+.choice-muted { opacity: .5; }
+
+/* Settings sits at the foot of the sidebar, away from the daily tabs. */
+@media (min-width: 900px) {
+	.app-nav .nav-item-last { margin-top: auto; }
+}
+
+/* Graph/Table switch, sitting in the chart's heading row. */
+.view-toggle { display: inline-flex; flex-shrink: 0; gap: 6px; }
+.view-toggle .jump-pill { padding: 6px 13px; font-size: 12px; }
+
+/* Counts and money line up on the right, so magnitudes compare down a column. */
+.data-table th.num, .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+	/* Stacked into cards, a right-aligned value would drift from its label. */
+	.data-table td.num { text-align: right; }
+}
+
+/* Page controls beneath a list. Hidden entirely when there is one page. */
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 15px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.pager-actions { display: flex; align-items: center; gap: 10px; }
+.pager-page { color: var(--muted); font-weight: 700; white-space: nowrap; }
+.pager .outline-button { display: inline-flex; align-items: center; gap: 4px; width: auto; margin: 0; padding: 8px 12px; white-space: nowrap; }
+.pager .outline-button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 620px) {
+	.pager { justify-content: center; }
+	.pager-actions { width: 100%; justify-content: space-between; }
+}
+
+/* A copy control confirms on itself; the accent marks the moment it lands. */
+.is-copied { color: var(--accent); border-color: var(--accent); }
+.icon-button.share-button { color: var(--accent-ink); background: var(--accent); border-color: transparent; }

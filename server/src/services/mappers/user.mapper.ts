@@ -35,8 +35,8 @@ export function toUserRead(user: UserDoc): UserRead {
       },
     },
     gym_meta: {
-      // Older accounts hold a BSON date here rather than a YYYY-MM-DD
-      // string; normalise so the client always gets one shape.
+      // Normalised on read: a migrated database holds a YYYY-MM-DD string,
+      // but an unmigrated one can still hold a BSON date here.
       joined_on: toCalendarDateStr(user.gym_meta.joined_on) ?? user.gym_meta.joined_on,
       membership_status: user.gym_meta.membership_status,
       assigned_trainer_id: user.gym_meta.assigned_trainer_id

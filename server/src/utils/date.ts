@@ -50,6 +50,56 @@ export function toCalendarDateStr(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Build a filter matching a calendar-date field stored in either form.
+ *
+ * `npm run normalize-dates` has converted every stored calendar date to a
+ * `YYYY-MM-DD` string, and the Node server only ever writes that form, so a
+ * plain string bound is correct against a current database. This helper stays
+ * because nothing guarantees the database a given deployment points at has been
+ * migrated: a restored backup, an untouched environment or an import from the
+ * Python-era server can all reintroduce BSON dates.
+ *
+ * It matters because MongoDB orders values of different BSON types by type
+ * rather than by value, so a bound of one form silently skips every document
+ * holding the other — no error, just a wrong answer. That failure mode is
+ * invisible in review and has already cost three bugs, so the cost of matching
+ * both forms is worth paying on the few queries that range over these fields.
+ *
+ * `$type` pins each branch to the form its bounds are written in, so a string
+ * bound can never be compared against a date document or vice versa.
+ *
+ * The result must be handed to the raw driver, not to a Mongoose query: the
+ * schema declares these fields as strings, so Mongoose would cast the Date
+ * bounds back to strings and reintroduce the mismatch.
+ *
+ * Pass a half-open or closed range; omitted ends are simply left unbounded.
+ */
+export function calendarDateRangeFilter(
+  field: string,
+  range: { gte?: string; lte?: string; lt?: string },
+): { $or: Record<string, unknown>[] } {
+  const asString: Record<string, unknown> = { $type: "string" };
+  const asDate: Record<string, unknown> = { $type: "date" };
+
+  if (range.gte !== undefined) {
+    asString["$gte"] = range.gte;
+    asDate["$gte"] = parseDateStr(range.gte);
+  }
+  if (range.lte !== undefined) {
+    asString["$lte"] = range.lte;
+    // A stored date sits at UTC midnight, so an inclusive upper bound of the
+    // same day matches it; no end-of-day padding is needed.
+    asDate["$lte"] = parseDateStr(range.lte);
+  }
+  if (range.lt !== undefined) {
+    asString["$lt"] = range.lt;
+    asDate["$lt"] = parseDateStr(range.lt);
+  }
+
+  return { $or: [{ [field]: asString }, { [field]: asDate }] };
+}
+
 /** Add whole days to a `YYYY-MM-DD` string, returning a new date string. */
 export function addDaysToDateStr(value: string, days: number): string {
   const date = parseDateStr(value);

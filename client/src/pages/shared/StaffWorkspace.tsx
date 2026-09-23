@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BadgePercent, CalendarCheck, ChartColumnBig as ChartBar, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Sun, UserRound, Users } from "lucide-react";
+import { BadgePercent, CalendarCheck, ChartColumnBig as ChartBar, ChevronLeft, ChevronRight, Clock, Dumbbell, LayoutGrid, LogOut, Moon, Search, Settings as SettingsIcon, Sun, UserPlus, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage } from "../../lib/axios";
 import {
@@ -28,6 +28,8 @@ import {
 	type TrainerDashboard,
 } from "../../services/checkinService";
 import {
+	assignTrainer,
+	createUser,
 	getMyProfile,
 	getUserById,
 	listMembers,
@@ -37,6 +39,7 @@ import {
 	type TrainerListItem,
 } from "../../services/userService";
 import { getActiveSubscriptionForMember, type Subscription } from "../../services/subscriptionService";
+import { getSettings, updateSettings, type Settings } from "../../services/settingsService";
 import {
 	getAnalytics,
 	getMemberCohort,
@@ -53,7 +56,7 @@ import type { AuthUser, MemberProfile } from "../../store/authStore";
  * Admin sees plan and coupon management plus the member list.
  * Trainer sees three tabs: attendance, a read-only catalogue, and their profile.
  */
-const STAFF_TABS = ["analytics", "members", "attendance", "plans", "coupons", "catalogue", "profile"] as const;
+const STAFF_TABS = ["analytics", "members", "attendance", "plans", "coupons", "catalogue", "profile", "settings"] as const;
 type StaffTab = (typeof STAFF_TABS)[number];
 
 const money = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN")}`;
@@ -95,6 +98,9 @@ export default function StaffWorkspace({
 						["attendance", CalendarCheck, "Attendance"],
 						["plans", LayoutGrid, "Plans"],
 						["coupons", BadgePercent, "Coupons"],
+						// Last, and pinned to the foot of the sidebar: configuration
+						// is not somewhere the admin works day to day.
+						["settings", SettingsIcon, "Settings"],
 				  ] as const)
 				: // Trainers: mark attendance, look up what is on sale, manage their
 				  // own profile. Plan and coupon editing stays with the Admin.
@@ -138,15 +144,20 @@ export default function StaffWorkspace({
 
 					{tab === "plans" && isAdmin && <PlanManager />}
 					{tab === "coupons" && isAdmin && <CouponManager />}
+					{/* The member profile is admin-only: it carries address, date of
+					    birth and payment history, none of which a trainer needs to
+					    run the floor. Gating here as well as on the row means a
+					    stray link cannot open it. */}
 					{tab === "members" && (
-						selectedMemberId
+						selectedMemberId && isAdmin
 							? <MemberDetail memberId={selectedMemberId} onBack={() => setSelectedMemberId(null)} />
-							: <MemberDirectory onOpenMember={setSelectedMemberId} />
+							: <MemberDirectory isAdmin={isAdmin} onOpenMember={setSelectedMemberId} />
 					)}
 					{tab === "attendance" && <AttendanceRecorder isAdmin={isAdmin} />}
 					{tab === "analytics" && isAdmin && <AnalyticsView />}
 					{tab === "catalogue" && <CatalogueView />}
 					{tab === "profile" && <StaffProfileView user={user} />}
+					{tab === "settings" && isAdmin && <SettingsView />}
 				</main>
 
 				{/* One nav, two shapes: a sidebar from 900px up, a bottom bar below. */}
@@ -155,7 +166,11 @@ export default function StaffWorkspace({
 						<button
 							key={key}
 							aria-current={tab === key ? "page" : undefined}
-							className={tab === key ? "nav-item active" : "nav-item"}
+							className={[
+								"nav-item",
+								tab === key ? "active" : "",
+								key === "settings" ? "nav-item-last" : "",
+							].filter(Boolean).join(" ")}
 							onClick={() => setTab(key)}
 						>
 							<Icon size={19} />
@@ -165,6 +180,362 @@ export default function StaffWorkspace({
 				</nav>
 			</div>
 		</div>
+	);
+}
+
+/* ── Filters ────────────────────────────────────────────────────────────── */
+
+/** Plan state, for narrowing a member list. */
+type PlanFilter = "all" | "active" | "no-plan";
+/** Whether today's attendance has been recorded. */
+type PresenceFilter = "all" | "present" | "absent";
+
+/**
+ * A compact row of filter pills.
+ *
+ * Each option carries its own count, so the size of a group is visible before
+ * it is selected — the point of the presence filter is knowing how many are
+ * still to mark, which a bare label would not tell you.
+ */
+function FilterPills({
+	label,
+	value,
+	options,
+	onChange,
+}: {
+	label: string;
+	value: string;
+	options: { key: string; label: string; count: number }[];
+	onChange: (key: string) => void;
+}) {
+	return (
+		<div className="filter-group" role="group" aria-label={label}>
+			{options.map((option) => (
+				<button
+					key={option.key}
+					className={value === option.key ? "filter-pill active" : "filter-pill"}
+					aria-pressed={value === option.key}
+					onClick={() => onChange(option.key)}
+				>
+					{option.label}
+					<span className="filter-count">{option.count}</span>
+				</button>
+			))}
+		</div>
+	);
+}
+
+/**
+ * Narrow a member list by plan state and by whether they are already marked
+ * present today.
+ *
+ * Presence is decided by the set of ids checked in today rather than by
+ * anything on the member, because attendance is charged per day: the first
+ * check-in of the day spends a visit and re-entry is free, so "present" means
+ * "appears in today's log", not a field on the record.
+ */
+function useMemberFilters(members: MemberListItem[], checkedInIds: Set<string>) {
+	const [plan, setPlan] = useState<PlanFilter>("all");
+	const [presence, setPresence] = useState<PresenceFilter>("all");
+
+	// Counts come from the unfiltered list, so each pill keeps showing the size
+	// of its own group rather than collapsing to zero once another is applied.
+	const counts = useMemo(() => {
+		let active = 0;
+		let noPlan = 0;
+		let present = 0;
+		for (const member of members) {
+			const status = member.subscription?.status ?? null;
+			if (status === "active") active += 1;
+			// No plan at all, or one that can no longer be used — either way the
+			// member cannot train, which is what the admin is looking for.
+			else noPlan += 1;
+			if (checkedInIds.has(member.id)) present += 1;
+		}
+		return {
+			all: members.length,
+			active,
+			noPlan,
+			present,
+			absent: members.length - present,
+		};
+	}, [members, checkedInIds]);
+
+	const filtered = useMemo(() => {
+		return members.filter((member) => {
+			const status = member.subscription?.status ?? null;
+			if (plan === "active" && status !== "active") return false;
+			if (plan === "no-plan" && status === "active") return false;
+
+			const isPresent = checkedInIds.has(member.id);
+			if (presence === "present" && !isPresent) return false;
+			if (presence === "absent" && isPresent) return false;
+			return true;
+		});
+	}, [members, checkedInIds, plan, presence]);
+
+	return { plan, setPlan, presence, setPresence, counts, filtered };
+}
+
+/* ── Paging ─────────────────────────────────────────────────────────────── */
+
+/** Rows shown per page in every gym-user and trainer listing. */
+const PAGE_SIZE = 10;
+
+/**
+ * Page controls for a list.
+ *
+ * Renders nothing for a single page, so a short list is not cluttered by a
+ * control that cannot do anything.
+ */
+function Pager({
+	page,
+	pages,
+	total,
+	onPage,
+	noun = "entries",
+}: {
+	page: number;
+	pages: number;
+	total: number;
+	onPage: (page: number) => void;
+	noun?: string;
+}) {
+	if (pages <= 1) return null;
+
+	// Inclusive, 1-based, and clamped to the total so the last page does not
+	// advertise rows it has not got.
+	const first = (page - 1) * PAGE_SIZE + 1;
+	const last = Math.min(page * PAGE_SIZE, total);
+
+	return (
+		<div className="pager">
+			<span className="muted">{first}–{last} of {total} {noun}</span>
+			<div className="pager-actions">
+				<button
+					className="outline-button compact-button"
+					onClick={() => onPage(page - 1)}
+					disabled={page <= 1}
+				>
+					<ChevronLeft size={15} /> Previous
+				</button>
+				<span className="pager-page">Page {page} of {pages}</span>
+				<button
+					className="outline-button compact-button"
+					onClick={() => onPage(page + 1)}
+					disabled={page >= pages}
+				>
+					Next <ChevronRight size={15} />
+				</button>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * Page a list that arrives whole.
+ *
+ * Trainer and cohort endpoints return every row at once, so the slicing
+ * happens here rather than server-side. The page is pulled back in range when
+ * the list shrinks — filtering to fewer rows while on page 3 would otherwise
+ * leave an empty table and no obvious way back.
+ */
+function useClientPage<T>(items: T[]) {
+	const [page, setPage] = useState(1);
+	const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+
+	useEffect(() => {
+		if (page > pages) setPage(pages);
+	}, [page, pages]);
+
+	const safePage = Math.min(page, pages);
+	const slice = useMemo(
+		() => items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+		[items, safePage],
+	);
+
+	return { page: safePage, pages, total: items.length, slice, setPage };
+}
+
+/* ── Admin: gym settings ────────────────────────────────────────────────── */
+
+/**
+ * Trainer visibility, the one policy in three states: every trainer sees all
+ * members, named trainers do, or each is scoped to their assignment.
+ *
+ * Saving is explicit rather than per-toggle, so an accidental click on a radio
+ * is not immediately a change to who can see whom.
+ */
+function SettingsView() {
+	const [settings, setSettings] = useState<Settings | null>(null);
+	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
+	const [visibility, setVisibility] = useState<"assigned" | "all">("assigned");
+	const [overrides, setOverrides] = useState<string[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState("");
+	const [notice, setNotice] = useState("");
+
+	const load = useCallback(async () => {
+		setLoading(true);
+		try {
+			const [current, trainerList] = await Promise.all([getSettings(), listTrainers()]);
+			setSettings(current);
+			setVisibility(current.trainer_visibility);
+			setOverrides(current.trainer_visibility_overrides);
+			setTrainers(trainerList);
+			setError("");
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	useEffect(() => { void load(); }, [load]);
+
+	// Compared against the saved copy so Save is live only when something
+	// actually differs, and the discard button knows there is something to drop.
+	const dirty = useMemo(() => {
+		if (!settings) return false;
+		const before = [...settings.trainer_visibility_overrides].sort().join(",");
+		const after = [...overrides].sort().join(",");
+		return settings.trainer_visibility !== visibility || before !== after;
+	}, [settings, visibility, overrides]);
+
+	function toggleOverride(trainerId: string) {
+		setOverrides((current) =>
+			current.includes(trainerId)
+				? current.filter((id) => id !== trainerId)
+				: [...current, trainerId],
+		);
+	}
+
+	async function save() {
+		setSaving(true); setError(""); setNotice("");
+		try {
+			const updated = await updateSettings({
+				trainer_visibility: visibility,
+				trainer_visibility_overrides: overrides,
+			});
+			setSettings(updated);
+			setVisibility(updated.trainer_visibility);
+			setOverrides(updated.trainer_visibility_overrides);
+			setNotice("Settings saved.");
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	function discard() {
+		if (!settings) return;
+		setVisibility(settings.trainer_visibility);
+		setOverrides(settings.trainer_visibility_overrides);
+		setNotice(""); setError("");
+	}
+
+	if (loading) return <div className="loading-state">Loading settings...</div>;
+
+	// Overrides only mean anything while the default is "assigned": with "all"
+	// every trainer already sees everyone, so the list would be a no-op.
+	const overridesApply = visibility === "assigned";
+
+	return (
+		<section className="view-stack">
+			<div className="section-heading">
+				<div><p className="eyebrow">Settings</p><h2>Trainer visibility</h2></div>
+			</div>
+
+			{error && <div className="error-message">{error}</div>}
+			{notice && <div className="profile-message">{notice}</div>}
+
+			<article className="staff-form">
+				<h3>Which members can a trainer see?</h3>
+				<p className="muted">
+					This decides the member list and the figures on a trainer's dashboard.
+					It never changes what an admin sees.
+				</p>
+
+				<div className="choice-list">
+					<label className={visibility === "assigned" ? "choice active" : "choice"}>
+						<input
+							type="radio"
+							name="trainer-visibility"
+							checked={visibility === "assigned"}
+							onChange={() => setVisibility("assigned")}
+						/>
+						<span>
+							<strong>Only their assigned members</strong>
+							<span className="cell-sub">
+								The default. A trainer sees the people assigned to them and nobody else.
+							</span>
+						</span>
+					</label>
+
+					<label className={visibility === "all" ? "choice active" : "choice"}>
+						<input
+							type="radio"
+							name="trainer-visibility"
+							checked={visibility === "all"}
+							onChange={() => setVisibility("all")}
+						/>
+						<span>
+							<strong>Every member in the gym</strong>
+							<span className="cell-sub">
+								Applies to all trainers at once. Assignments still exist, but stop limiting the list.
+							</span>
+						</span>
+					</label>
+				</div>
+			</article>
+
+			<article className="staff-form">
+				<h3>Trainers who always see everyone</h3>
+				<p className="muted">
+					{overridesApply
+						? "Pick the trainers who should see every member regardless of assignment."
+						: "Not in use while every trainer already sees all members."}
+				</p>
+
+				{trainers.length === 0 ? (
+					<div className="empty-state">No trainers yet.</div>
+				) : (
+					<div className="choice-list">
+						{trainers.map((trainer) => (
+							<label
+								key={trainer.id}
+								className={
+									// Kept selectable but visibly inert when the wider policy
+									// already covers everyone, so a saved choice is not lost.
+									`choice${overrides.includes(trainer.id) ? " active" : ""}${overridesApply ? "" : " choice-muted"}`
+								}
+							>
+								<input
+									type="checkbox"
+									checked={overrides.includes(trainer.id)}
+									onChange={() => toggleOverride(trainer.id)}
+								/>
+								<span>
+									<strong>{trainer.full_name}</strong>
+									<span className="cell-sub">{trainer.phone}</span>
+								</span>
+							</label>
+						))}
+					</div>
+				)}
+			</article>
+
+			<div className="form-actions">
+				<button className="primary-action" onClick={save} disabled={saving || !dirty}>
+					{saving ? "Saving..." : "Save changes"}
+				</button>
+				{dirty && (
+					<button className="outline-button" onClick={discard} disabled={saving}>Discard</button>
+				)}
+			</div>
+		</section>
 	);
 }
 
@@ -346,7 +717,6 @@ function PlanManager() {
 				<h3>{plan.plan_name}</h3>
 				<p>{plan.description || "No description."}</p>
 				<div className="plan-meta"><span>{plan.calendar_days} calendar days</span><span>{plan.allocated_days} gym visits</span></div>
-				<span className={plan.is_active ? "status-dot" : "status-dot failed"}>{plan.is_active ? "Active" : "Archived"}</span>
 				<div className="form-actions">
 					<button className="outline-button compact-button" onClick={() => startEdit(plan)}>Edit</button>
 					<button className="outline-button compact-button" onClick={() => toggleActive(plan)}>{plan.is_active ? "Deactivate" : "Activate"}</button>
@@ -458,7 +828,6 @@ function CouponManager() {
 			<div id="active-coupons" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Coupon management</p><h2>Active coupons</h2></div>
-					<span className="muted">{activeCoupons.length} running</span>
 				</div>
 				{loading ? <div className="loading-state">Loading coupons...</div>
 					: activeCoupons.length === 0 ? <div className="empty-state">No active coupons. Add one below.</div>
@@ -468,7 +837,6 @@ function CouponManager() {
 			<div id="inactive-coupons" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Archived</p><h2>Inactive coupons</h2></div>
-					<span className="muted">{inactiveCoupons.length} archived</span>
 				</div>
 				{inactiveCoupons.length === 0
 					? <div className="empty-state">No inactive coupons.</div>
@@ -516,7 +884,6 @@ function CouponManager() {
 			<article className="coupon-row" key={coupon.id}>
 				<div className="coupon-row-main">
 					<div><strong>{coupon.code}</strong><span>{coupon.name} · {discountLabel(coupon)}</span></div>
-					<span className={coupon.is_active ? "status-dot" : "status-dot failed"}>{coupon.is_active ? "Active" : "Inactive"}</span>
 				</div>
 				<div className="coupon-row-meta">
 					<span>Used {coupon.current_uses}/{coupon.max_uses}</span>
@@ -565,6 +932,7 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
 	}, [search, load]);
 
 	const checkedInIds = useMemo(() => new Set(today.map((item) => item.member.id)), [today]);
+	const memberPage = useClientPage(members);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -623,23 +991,32 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
 			{notice && <div className="profile-message">{notice}</div>}
 
 			{loading ? <div className="loading-state">Loading members...</div> : members.length === 0 ? <div className="empty-state">No members matched your search.</div> : (
-				<div className="history-list">
-					{members.map((member) => {
-						const done = checkedInIds.has(member.id);
-						return (
-							<article className="history-row" key={member.id}>
-								<div>
-									<strong>{member.full_name}</strong>
-									<span>{member.phone} · {member.gym_meta.membership_status}</span>
-								</div>
-								{done
-									? <span className="status-dot">Present today</span>
-									: <button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
-											{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
-										</button>}
-							</article>
-						);
-					})}
+				<div>
+					<div className="history-list">
+						{memberPage.slice.map((member) => {
+							const done = checkedInIds.has(member.id);
+							return (
+								<article className="history-row" key={member.id}>
+									<div>
+										<strong>{member.full_name}</strong>
+										<span>{member.phone} · {member.gym_meta.membership_status}</span>
+									</div>
+									{done
+										? <span className="status-dot">Present today</span>
+										: <button className="outline-button compact-button" onClick={() => mark(member)} disabled={markingId === member.id}>
+												{markingId === member.id ? "Marking..." : <>Mark present <ChevronRight size={15} /></>}
+											</button>}
+								</article>
+							);
+						})}
+					</div>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="members"
+					/>
 				</div>
 			)}
 
@@ -671,6 +1048,7 @@ function MemberManager({ isAdmin }: { isAdmin: boolean }) {
  * editable. Plan and coupon management stays with the Admin.
  */
 function CatalogueView() {
+	const [view, setView] = useState<"plans" | "offers">("plans");
 	const [plans, setPlans] = useState<Plan[]>([]);
 	const [coupons, setCoupons] = useState<Coupon[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -704,13 +1082,36 @@ function CatalogueView() {
 
 	if (loading) return <div className="loading-state">Loading plans and offers...</div>;
 
+	const showingPlans = view === "plans";
+
 	return (
 		<section className="view-stack">
+			{/* One list at a time: a trainer looking up a price is not also
+			    looking up a discount code. */}
+			<nav className="section-jump" aria-label="Choose catalogue">
+				<button
+					className={showingPlans ? "jump-pill active" : "jump-pill"}
+					aria-current={showingPlans ? "true" : undefined}
+					onClick={() => setView("plans")}
+				>
+					Plans
+				</button>
+				<button
+					className={showingPlans ? "jump-pill" : "jump-pill active"}
+					aria-current={showingPlans ? undefined : "true"}
+					onClick={() => setView("offers")}
+				>
+					Offers
+				</button>
+			</nav>
+
+			{error && <div className="error-message">{error}</div>}
+
+			{showingPlans ? (
+			<>
 			<div className="section-heading">
 				<div><p className="eyebrow">Catalogue</p><h2>Active plans</h2></div>
 			</div>
-
-			{error && <div className="error-message">{error}</div>}
 
 			{plans.length === 0 ? (
 				<div className="empty-state">No active plans right now.</div>
@@ -733,9 +1134,11 @@ function CatalogueView() {
 				</div>
 			)}
 
+			</>
+			) : (
+			<>
 			<div className="section-heading">
 				<div><p className="eyebrow">Offers</p><h2>Running coupons</h2></div>
-				<span className="muted">{liveCoupons.length} live</span>
 			</div>
 
 			{liveCoupons.length === 0 ? (
@@ -753,10 +1156,11 @@ function CatalogueView() {
 									{` · ${Math.max(0, coupon.max_uses - coupon.current_uses)} left`}
 								</small>
 							</div>
-							<span className="status-dot">Live</span>
 						</article>
 					))}
 				</div>
+			)}
+			</>
 			)}
 
 			<p className="muted catalogue-note">
@@ -936,42 +1340,172 @@ function Detail({ label, value }: { label: string; value: string }) {
  * Opening a row shows that member's profile rather than navigating away, so
  * returning to the list keeps the search term.
  */
-function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void }) {
+/**
+ * How a subscription status reads in the member table.
+ *
+ * A plan ends on two independent axes and the difference matters to whoever is
+ * on the floor: `expired` means the calendar window closed, `exhausted` means
+ * the visit quota ran out while the window is still open. Collapsing them into
+ * one "inactive" would tell a trainer the wrong thing about why someone cannot
+ * train, so each keeps its own label and tone.
+ */
+const SUBSCRIPTION_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
+	active: { label: "Active", tone: "status-dot" },
+	// Quota spent, calendar window still open — a renewal conversation, not a
+	// failure, so it reads as a warning rather than in the danger colour.
+	exhausted: { label: "Visits used up", tone: "status-dot warn" },
+	expired: { label: "Expired", tone: "status-dot failed" },
+	cancelled: { label: "Cancelled", tone: "status-dot failed" },
+	paused: { label: "Paused", tone: "status-dot warn" },
+};
+
+function subscriptionStatusView(status: string) {
+	return (
+		SUBSCRIPTION_STATUS_LABELS[status] ?? {
+			// An unrecognised status still shows its raw value rather than being
+			// silently swallowed into one of the known states.
+			label: status,
+			tone: "status-dot warn",
+		}
+	);
+}
+
+interface NewAccountForm {
+	full_name: string;
+	phone: string;
+	password: string;
+	email: string;
+	/** Only used when creating a gym user; trainers take no assignment. */
+	trainer_id: string;
+}
+
+const emptyAccountForm: NewAccountForm = {
+	full_name: "",
+	phone: "",
+	password: "",
+	email: "",
+	trainer_id: "",
+};
+
+/**
+ * Create a gym user or a trainer.
+ *
+ * One component for both, because the fields differ only by the trainer
+ * dropdown — which exists for gym users alone. Assignment runs one way, from
+ * the gym user's side, so there is no "add members to this trainer" flow here.
+ */
+function NewAccountForm({
+	role,
+	trainers,
+	saving,
+	onSubmit,
+	onCancel,
+}: {
+	role: "member" | "trainer";
+	trainers: TrainerListItem[];
+	saving: boolean;
+	onSubmit: (form: NewAccountForm) => void;
+	onCancel: () => void;
+}) {
+	const [form, setForm] = useState<NewAccountForm>(emptyAccountForm);
+	const isMember = role === "member";
+	const change = (key: keyof NewAccountForm) =>
+		(event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+			setForm((current) => ({ ...current, [key]: event.target.value }));
+
+	return (
+		<article className="staff-form">
+			<h3>{isMember ? "Add gym user" : "Add trainer"}</h3>
+			<div className="profile-form-grid">
+				<div className="field">
+					<label>Full name</label>
+					<input value={form.full_name} onChange={change("full_name")} placeholder="Anita Sharma" />
+				</div>
+				<div className="field">
+					<label>Phone</label>
+					<input value={form.phone} onChange={change("phone")} placeholder="+919876543210" />
+				</div>
+				<div className="field">
+					<label>Password</label>
+					<input type="password" value={form.password} onChange={change("password")} placeholder="At least 6 characters" />
+				</div>
+				<div className="field">
+					<label>Email <span className="optional-label">optional</span></label>
+					<input type="email" value={form.email} onChange={change("email")} placeholder="anita@example.com" />
+				</div>
+				{isMember && (
+					<div className="field">
+						<label>Trainer <span className="optional-label">optional</span></label>
+						<select value={form.trainer_id} onChange={change("trainer_id")}>
+							<option value="">No trainer yet</option>
+							{trainers.map((trainer) => (
+								<option key={trainer.id} value={trainer.id}>{trainer.full_name}</option>
+							))}
+						</select>
+					</div>
+				)}
+			</div>
+			<div className="form-actions">
+				<button className="primary-action" onClick={() => onSubmit(form)} disabled={saving}>
+					{saving ? "Saving..." : isMember ? "Add gym user" : "Add trainer"}
+				</button>
+				<button className="outline-button" onClick={onCancel} disabled={saving}>Cancel</button>
+			</div>
+		</article>
+	);
+}
+
+function MemberDirectory({ isAdmin, onOpenMember }: { isAdmin: boolean; onOpenMember: (id: string) => void }) {
 	const [audience, setAudience] = useState<"members" | "trainers">("members");
 	const [members, setMembers] = useState<MemberListItem[]>([]);
 	const [trainers, setTrainers] = useState<TrainerListItem[]>([]);
 	const [today, setToday] = useState<TodayCheckIn[]>([]);
 	const [total, setTotal] = useState(0);
+	const [scope, setScope] = useState<"all" | "assigned">("all");
 	const [search, setSearch] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [markingId, setMarkingId] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
-
+	const [creating, setCreating] = useState<"member" | "trainer" | null>(null);
+	const [saving, setSaving] = useState(false);
 	const load = useCallback(async (term: string) => {
 		setLoading(true);
 		try {
-			// Today's check-ins drive the per-row attendance state.
-			const [result, trainerList, todayList] = await Promise.all([
-				listMembers({ search: term, role: "member", limit: 100 }),
-				listTrainers(),
+			// Today's check-ins drive the per-row attendance state. The member
+			// list carries each plan, so the table needs no per-row lookup.
+			//
+			// The whole matching set is fetched rather than one page: presence is
+			// only known on the client, so filtering and counting a single page
+			// would describe the page rather than the gym — "4 still to mark"
+			// would mean four on this page. Paging then happens locally.
+			const [result, todayList] = await Promise.all([
+				listMembers({
+					search: term,
+					role: "member",
+					limit: 100,
+					includeSubscription: true,
+				}),
 				getTodayCheckIns(),
 			]);
 			setMembers(result.items);
 			setTotal(result.meta.total);
-			setTrainers(trainerList);
+			setScope(result.scope ?? "all");
 			setToday(todayList);
+			// GET /users/trainers is owner-only, so a trainer asking for it gets
+			// a 403 that would blank the whole directory. Trainers have no
+			// trainer tab and no assignment dropdown, so they simply skip it.
+			setTrainers(isAdmin ? await listTrainers() : []);
 			setError("");
 		} catch (requestError) {
 			setError(apiErrorMessage(requestError));
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [isAdmin]);
 
-	useEffect(() => { void load(""); }, [load]);
-
-	// Debounced so typing does not fire a request per keystroke.
+	// Debounced so typing does not fire a request per keystroke. Also covers
+	// the first load, so there is one fetch path.
 	useEffect(() => {
 		const timer = window.setTimeout(() => { void load(search.trim()); }, 350);
 		return () => window.clearTimeout(timer);
@@ -990,6 +1524,60 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
 		);
 	}, [trainers, search]);
+	const trainerPage = useClientPage(visibleTrainers);
+	const filters = useMemberFilters(members, checkedInIds);
+	const memberPage = useClientPage(filters.filtered);
+
+	/**
+	 * Create a gym user or a trainer.
+	 *
+	 * A gym user may optionally be pointed at a trainer, which is a second call
+	 * — the create endpoint takes no trainer. If that second call fails the
+	 * account still exists, so the message says so rather than implying nothing
+	 * happened.
+	 */
+	async function createAccount(form: NewAccountForm, role: "member" | "trainer") {
+		const name = form.full_name.trim();
+		// Mirrors the backend rule: 10 digits starting 6-9, optional +91, with
+		// spaces, dashes and a leading 0 normalised away. Checking the same
+		// thing here turns a round-trip 422 into an immediate message.
+		const phone = form.phone.replace(/[\s\-()]/g, "");
+		if (name.length < 2) return setError("Enter a name of at least 2 characters.");
+		if (!/^(\+91)?[6-9]\d{9}$/.test(phone.replace(/^0(?=\d{10}$)/, ""))) {
+			return setError("Enter a valid 10-digit Indian mobile number, starting 6-9.");
+		}
+		if (form.password.length < 6) return setError("Password must be at least 6 characters.");
+
+		setSaving(true); setError(""); setNotice("");
+		try {
+			const created = await createUser({
+				full_name: name,
+				phone,
+				password: form.password,
+				role,
+				email: form.email.trim() || undefined,
+			});
+
+			if (role === "member" && form.trainer_id) {
+				try {
+					await assignTrainer(created.id, form.trainer_id);
+					setNotice(`${name} added and assigned to their trainer.`);
+				} catch (assignError) {
+					setNotice(`${name} was created, but assigning the trainer failed: ${apiErrorMessage(assignError)}`);
+				}
+			} else {
+				setNotice(`${name} added.`);
+			}
+
+			setCreating(null);
+			// Trainers may have changed, so reload both lists.
+			await load(search.trim());
+		} catch (requestError) {
+			setError(apiErrorMessage(requestError));
+		} finally {
+			setSaving(false);
+		}
+	}
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1007,48 +1595,120 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 
 	return (
 		<section className="view-stack">
-			<nav className="section-jump" aria-label="Choose directory">
-				<button
-					className={showingTrainers ? "jump-pill" : "jump-pill active"}
-					aria-current={showingTrainers ? undefined : "true"}
-					onClick={() => setAudience("members")}
-				>
-					Gym users
-				</button>
-				<button
-					className={showingTrainers ? "jump-pill active" : "jump-pill"}
-					aria-current={showingTrainers ? "true" : undefined}
-					onClick={() => setAudience("trainers")}
-				>
-					Trainers
-				</button>
-			</nav>
+			{/* Choosing an audience is an admin affordance: a trainer manages
+			    people, not the trainer roster, so they go straight to their
+			    members. */}
+			{isAdmin && (
+				<nav className="section-jump" aria-label="Choose directory">
+					<button
+						className={showingTrainers ? "jump-pill" : "jump-pill active"}
+						aria-current={showingTrainers ? undefined : "true"}
+						onClick={() => { setAudience("members"); setCreating(null); }}
+					>
+						Gym users
+					</button>
+					<button
+						className={showingTrainers ? "jump-pill active" : "jump-pill"}
+						aria-current={showingTrainers ? "true" : undefined}
+						onClick={() => { setAudience("trainers"); setCreating(null); }}
+					>
+						Trainers
+					</button>
+				</nav>
+			)}
 
 			<div className="insight-grid">
 				<article className="insight-card accent-card">
 					<Users size={19} />
 					<strong>{showingTrainers ? trainers.length : total}</strong>
-					<span>{showingTrainers ? "trainers" : "gym users"}</span>
+					{/* A scoped trainer sees only their own people; saying so stops a
+					    short list reading as a missing one. */}
+					<span>
+						{showingTrainers
+							? "trainers"
+							: scope === "assigned"
+								? "members assigned to you"
+								: "gym users"}
+					</span>
 				</article>
 				{!showingTrainers && (
 					<article className="insight-card">
 						<CalendarCheck size={19} /><strong>{activeCount}</strong><span>active now</span>
 					</article>
 				)}
+				{!showingTrainers && (
+					<article className="insight-card">
+						<Clock size={19} /><strong>{checkedInIds.size}</strong><span>present today</span>
+					</article>
+				)}
 			</div>
 
-			<div className="search-row">
-				<Search size={16} />
-				<input
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
-					aria-label="Search directory"
-				/>
+			<div className="directory-toolbar">
+				<div className="search-row">
+					<Search size={16} />
+					<input
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+						aria-label="Search directory"
+					/>
+				</div>
+				{/* Filters sit between the search and the create button, so the
+				    row reads narrow-then-act. Trainers have no plan and cannot be
+				    marked present, so the filters only apply to gym users. */}
+				{!showingTrainers && (
+					<div className="toolbar-filters">
+						<FilterPills
+							label="Filter by plan"
+							value={filters.plan}
+							onChange={(key) => filters.setPlan(key as PlanFilter)}
+							options={[
+								{ key: "all", label: "All", count: filters.counts.all },
+								{ key: "active", label: "Active plan", count: filters.counts.active },
+								{ key: "no-plan", label: "No plan", count: filters.counts.noPlan },
+							]}
+						/>
+						<FilterPills
+							label="Filter by attendance"
+							value={filters.presence}
+							onChange={(key) => filters.setPresence(key as PresenceFilter)}
+							options={[
+								{ key: "all", label: "All", count: filters.counts.all },
+								{ key: "absent", label: "Not present", count: filters.counts.absent },
+								{ key: "present", label: "Present", count: filters.counts.present },
+							]}
+						/>
+					</div>
+				)}
+				{/* Creating accounts is owner-only on the backend, so the buttons
+				    are too — a trainer pressing them would only earn a 403. */}
+				{isAdmin && !creating && (
+					<button
+						className="primary-action compact-button"
+						onClick={() => { setCreating(showingTrainers ? "trainer" : "member"); setError(""); setNotice(""); }}
+					>
+						<UserPlus size={15} />
+						{showingTrainers ? "Add trainer" : "Add gym user"}
+					</button>
+				)}
+
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
 			{notice && <div className="profile-message">{notice}</div>}
+
+			{isAdmin && creating && (
+				<NewAccountForm
+					// Remount on role change so switching tabs mid-entry starts clean
+					// rather than carrying a half-filled member form into the trainer one.
+					key={creating}
+					role={creating}
+					trainers={trainers}
+					saving={saving}
+					onSubmit={(form) => void createAccount(form, creating)}
+					onCancel={() => { setCreating(null); setError(""); }}
+				/>
+			)}
 
 			{loading ? (
 				<div className="loading-state">Loading directory...</div>
@@ -1062,7 +1722,7 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 								<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Status</th></tr>
 							</thead>
 							<tbody>
-								{visibleTrainers.map((trainer) => (
+								{trainerPage.slice.map((trainer) => (
 									<tr
 										key={trainer.id}
 										className="row-clickable"
@@ -1090,44 +1750,80 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 								))}
 							</tbody>
 						</table>
+						<Pager
+							page={trainerPage.page}
+							pages={trainerPage.pages}
+							total={trainerPage.total}
+							onPage={trainerPage.setPage}
+							noun="trainers"
+						/>
 					</div>
 				)
-			) : members.length === 0 ? (
-				<div className="empty-state">No gym users matched your search.</div>
+			) : filters.filtered.length === 0 ? (
+				<div className="empty-state">
+					{members.length === 0
+						? "No gym users matched your search."
+						: "No gym users match these filters."}
+				</div>
 			) : (
 				<div className="table-wrap">
 					<table className="data-table">
 						<thead>
-							<tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Attendance</th></tr>
+							<tr>
+								<th>Member ID</th>
+								<th>Name</th>
+								<th>Phone</th>
+								<th>Subscription</th>
+								<th>Attendance</th>
+							</tr>
 						</thead>
 						<tbody>
-							{members.map((member) => {
+							{memberPage.slice.map((member) => {
 								const done = checkedInIds.has(member.id);
+								const plan = member.subscription;
+								const status = plan ? subscriptionStatusView(plan.status) : null;
+								// Check-in is refused without a live plan, so the button is
+								// offered only when it can actually succeed.
+								const canTrain = plan?.status === "active";
 								return (
-									// The row opens the profile; the attendance cell stops the
-									// click so marking present never navigates away.
+									// Only an admin can open the profile. A trainer needs to
+									// mark attendance, not read a member's address, date of
+									// birth and payment history, so their rows are inert.
 									<tr
 										key={member.id}
-										className="row-clickable"
-										onClick={() => onOpenMember(member.id)}
-										onKeyDown={(event) => {
+										className={isAdmin ? "row-clickable" : undefined}
+										onClick={isAdmin ? () => onOpenMember(member.id) : undefined}
+										onKeyDown={isAdmin ? (event) => {
 											if (event.key === "Enter" || event.key === " ") {
 												event.preventDefault();
 												onOpenMember(member.id);
 											}
-										}}
-										tabIndex={0}
-										role="button"
-										aria-label={`Open ${member.full_name}`}
+										} : undefined}
+										tabIndex={isAdmin ? 0 : undefined}
+										role={isAdmin ? "button" : undefined}
+										aria-label={isAdmin ? `Open ${member.full_name}` : undefined}
 									>
-										<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
+										<td data-label="Member ID"><code className="row-id">{shortId(member.id)}</code></td>
 										<td data-label="Name"><strong>{member.full_name}</strong></td>
 										<td data-label="Phone">{member.phone}</td>
-										<td data-label="Email">{member.email ?? "—"}</td>
+										<td data-label="Subscription">
+											{plan && status ? (
+												<>
+													<span className={status.tone}>{status.label}</span>
+													{/* Both axes, because either can be the one that
+													    ends the plan and they are different numbers. */}
+													<span className="cell-sub">
+														{plan.days_remaining} {plan.days_remaining === 1 ? "visit" : "visits"} · {plan.days_until_expiry}d left
+													</span>
+												</>
+											) : (
+												<span className="muted">No plan</span>
+											)}
+										</td>
 										<td data-label="Attendance" onClick={(event) => event.stopPropagation()}>
 											{done ? (
 												<span className="status-dot">Present today</span>
-											) : (
+											) : canTrain ? (
 												<button
 													className="outline-button compact-button"
 													onClick={() => mark(member)}
@@ -1135,6 +1831,8 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 												>
 													{markingId === member.id ? "Marking..." : "Mark attendance"}
 												</button>
+											) : (
+												<span className="muted" title="Check-in needs a live plan">Needs a plan</span>
 											)}
 										</td>
 									</tr>
@@ -1142,6 +1840,13 @@ function MemberDirectory({ onOpenMember }: { onOpenMember: (id: string) => void 
 							})}
 						</tbody>
 					</table>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun={scope === "assigned" ? "assigned members" : "gym users"}
+					/>
 				</div>
 			)}
 		</section>
@@ -1341,6 +2046,20 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 			(t) => t.full_name.toLowerCase().includes(term) || t.phone.includes(term),
 		);
 	}, [trainers, search]);
+	const trainerPage = useClientPage(visibleTrainers);
+
+	const [presence, setPresence] = useState<PresenceFilter>("all");
+	const presenceCounts = useMemo(() => {
+		const present = members.filter((m) => checkedInIds.has(m.id)).length;
+		return { all: members.length, present, absent: members.length - present };
+	}, [members, checkedInIds]);
+	const visibleMembers = useMemo(() => {
+		if (presence === "all") return members;
+		return members.filter((m) =>
+			presence === "present" ? checkedInIds.has(m.id) : !checkedInIds.has(m.id),
+		);
+	}, [members, checkedInIds, presence]);
+	const memberPage = useClientPage(visibleMembers);
 
 	async function mark(member: MemberListItem) {
 		setMarkingId(member.id); setError(""); setNotice("");
@@ -1393,14 +2112,33 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 				</div>
 			)}
 
-			<div className="search-row">
-				<Search size={16} />
-				<input
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
-					aria-label="Search"
-				/>
+			<div className="directory-toolbar">
+				<div className="search-row">
+					<Search size={16} />
+					<input
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder={showingTrainers ? "Search trainers" : "Search by name or phone"}
+						aria-label="Search"
+					/>
+				</div>
+				{/* Splits the list into who still needs marking and who is done.
+				    Staff hold no plan and cannot be checked in, so trainers are
+				    excluded. */}
+				{!showingTrainers && (
+					<div className="toolbar-filters">
+						<FilterPills
+							label="Filter by attendance"
+							value={presence}
+							onChange={(key) => setPresence(key as PresenceFilter)}
+							options={[
+								{ key: "all", label: "Everyone", count: presenceCounts.all },
+								{ key: "absent", label: "Not present", count: presenceCounts.absent },
+								{ key: "present", label: "Present", count: presenceCounts.present },
+							]}
+						/>
+					</div>
+				)}
 			</div>
 
 			{error && <div className="error-message">{error}</div>}
@@ -1417,7 +2155,7 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 							<table className="data-table">
 								<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
 								<tbody>
-									{visibleTrainers.map((trainer) => (
+									{trainerPage.slice.map((trainer) => (
 										<tr key={trainer.id}>
 											<td data-label="ID"><code className="row-id">{shortId(trainer.id)}</code></td>
 											<td data-label="Name"><strong>{trainer.full_name}</strong></td>
@@ -1431,6 +2169,13 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 									))}
 								</tbody>
 							</table>
+							<Pager
+								page={trainerPage.page}
+								pages={trainerPage.pages}
+								total={trainerPage.total}
+								onPage={trainerPage.setPage}
+								noun="trainers"
+							/>
 						</div>
 						<p className="muted catalogue-note">
 							Trainer shifts are not tracked as gym attendance — check-in draws down a
@@ -1438,14 +2183,20 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 						</p>
 					</>
 				)
-			) : members.length === 0 ? (
-				<div className="empty-state">No gym users matched your search.</div>
+			) : visibleMembers.length === 0 ? (
+				<div className="empty-state">
+					{members.length === 0
+						? "No gym users matched your search."
+						: presence === "absent"
+							? "Everyone here has been marked present today."
+							: "Nobody here has been marked present yet."}
+				</div>
 			) : (
 				<div className="table-wrap">
 					<table className="data-table">
 						<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Attendance</th></tr></thead>
 						<tbody>
-							{members.map((member) => {
+							{memberPage.slice.map((member) => {
 								const done = checkedInIds.has(member.id);
 								return (
 									<tr key={member.id}>
@@ -1470,6 +2221,13 @@ function AttendanceRecorder({ isAdmin }: { isAdmin: boolean }) {
 							})}
 						</tbody>
 					</table>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="gym users"
+					/>
 				</div>
 			)}
 		</section>
@@ -1671,6 +2429,7 @@ function AnalyticsView() {
  * opacity — magnitude, not identity.
  */
 function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
+	const [view, setView] = useState<"graph" | "table">("graph");
 	// Plans nobody is on would render as a row of empty labels.
 	const rows = breakdown.filter((item) => item.active_members > 0 || item.total_sold > 0);
 	const peak = Math.max(1, ...rows.map((item) => item.active_members));
@@ -1695,9 +2454,31 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 
 	return (
 		<>
-			<div className="section-heading"><h3>Members per plan</h3></div>
+			<div className="section-heading">
+				<h3>Members per plan</h3>
+				{/* One view at a time: the bars for comparison, the table for the
+				    exact figures the bars cannot carry. */}
+				<div className="view-toggle" role="group" aria-label="Choose view">
+					<button
+						className={view === "graph" ? "jump-pill active" : "jump-pill"}
+						aria-pressed={view === "graph"}
+						onClick={() => setView("graph")}
+					>
+						Graph
+					</button>
+					<button
+						className={view === "table" ? "jump-pill active" : "jump-pill"}
+						aria-pressed={view === "table"}
+						onClick={() => setView("table")}
+					>
+						Table
+					</button>
+				</div>
+			</div>
 
 			<div className="chart-panel">
+				{view === "graph" ? (
+				<>
 				<div className="chart-plot">
 					{/* Hairline grid, one step off the surface — recessive, so the
 					    bars stay the loudest thing in the panel. */}
@@ -1757,21 +2538,39 @@ function PlanMembersChart({ breakdown }: { breakdown: PlanBreakdownItem[] }) {
 					</span>
 				</div>
 				<p className="chart-axis-caption">members currently on each plan</p>
+				</>
+				) : (
+					/* The same rows as the bars, with the two figures the chart
+					   leaves out: everything ever sold, and what it earned. */
+					<div className="table-wrap">
+						<table className="data-table">
+							<thead>
+								<tr>
+									<th>Plan</th>
+									<th className="num">Active members</th>
+									<th className="num">Total sold</th>
+									<th className="num">Revenue</th>
+								</tr>
+							</thead>
+							<tbody>
+								{rows.map((item) => (
+									<tr key={item.plan_id}>
+										<td data-label="Plan">
+											<strong>{item.plan_name}</strong>
+											{/* Same marker the bars carry, so a plan reads the
+											    same way in either view. */}
+											{!item.is_active && <em className="chart-archived"> archived</em>}
+										</td>
+										<td data-label="Active members" className="num">{item.active_members}</td>
+										<td data-label="Total sold" className="num">{item.total_sold}</td>
+										<td data-label="Revenue" className="num">{money(item.revenue_paise)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)}
 			</div>
-
-			{/* A table view, so the figures are readable without the bars. */}
-			<details className="chart-table">
-				<summary>View as table</summary>
-				<div className="detail-list">
-					{rows.map((item) => (
-						<Detail
-							key={item.plan_id}
-							label={item.plan_name}
-							value={`${item.active_members} members · ${item.total_sold} sold · ${money(item.revenue_paise)}`}
-						/>
-					))}
-				</div>
-			</details>
 		</>
 	);
 }
@@ -1978,6 +2777,8 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 		return () => { cancelled = true; };
 	}, [cohort]);
 
+	const memberPage = useClientPage(members);
+
 	return (
 		<div className="cohort-panel">
 			<div className="cohort-panel-head">
@@ -1996,7 +2797,7 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 					<table className="data-table">
 						<thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Joined</th></tr></thead>
 						<tbody>
-							{members.map((member) => (
+							{memberPage.slice.map((member) => (
 								<tr key={member.id}>
 									<td data-label="ID"><code className="row-id">{shortId(member.id)}</code></td>
 									<td data-label="Name"><strong>{member.full_name}</strong></td>
@@ -2007,6 +2808,13 @@ function CohortTable({ cohort, onClose }: { cohort: MemberCohort; onClose: () =>
 							))}
 						</tbody>
 					</table>
+					<Pager
+						page={memberPage.page}
+						pages={memberPage.pages}
+						total={memberPage.total}
+						onPage={memberPage.setPage}
+						noun="members"
+					/>
 				</div>
 			)}
 		</div>

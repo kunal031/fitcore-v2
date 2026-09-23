@@ -86,6 +86,7 @@ export const COLLECTIONS = {
   COUPONS: "coupons",
   REFERRALS: "referrals",
   PASSWORD_RESET_OTPS: "password_reset_otps",
+  SETTINGS: "settings",
 } as const;
 
 // ── Misc ───────────────────────────────────────────────────────────────────
@@ -97,3 +98,25 @@ export const PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = 10;
 
 /** Cron jobs run on India time. */
 export const SCHEDULER_TIMEZONE = "Asia/Kolkata";
+
+// ── Settings ───────────────────────────────────────────────────────────────
+/**
+ * Gym-wide settings, stored as one key-value document per key.
+ *
+ * Key-value rather than named columns because more settings are planned, and
+ * this way adding one is a write rather than a schema change.
+ */
+export const SETTING_KEYS = {
+  /** "assigned" (default) | "all" — which members a trainer may see. */
+  TRAINER_VISIBILITY: "trainer_visibility",
+  /** Trainer ids exempt from the above, i.e. who see everyone regardless. */
+  TRAINER_VISIBILITY_OVERRIDES: "trainer_visibility_overrides",
+} as const;
+
+/** How widely a trainer may see the member roster. */
+export const TRAINER_VISIBILITY = {
+  ASSIGNED: "assigned",
+  ALL: "all",
+} as const;
+export type TrainerVisibility =
+  (typeof TRAINER_VISIBILITY)[keyof typeof TRAINER_VISIBILITY];

@@ -30,9 +30,17 @@ export const userController = {
     res.json(success(data, "Profile updated successfully."));
   }),
 
-  /** GET /users — paginated staff-facing member list. */
+  /**
+   * GET /users — paginated staff-facing member list.
+   *
+   * The caller is passed through because a trainer's view is scoped to the
+   * members assigned to them; the service decides, not the query string.
+   */
   listUsers: asyncHandler(async (req: Request, res: Response) => {
-    const data = await userService.listUsers(req.query as unknown as ListUsersQuery);
+    const data = await userService.listUsers(
+      req.query as unknown as ListUsersQuery,
+      currentUser(req),
+    );
     res.json(success(data));
   }),
 

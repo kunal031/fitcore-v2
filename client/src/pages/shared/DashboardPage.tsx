@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeIndianRupee, CalendarDays, ChevronLeft, ChevronRight, Download, CheckCircle2, CreditCard, Copy, Dumbbell, LogOut, Moon, Share2, Sparkles, Sun, Tag, Ticket, UserRound, Users } from "lucide-react";
+import { BadgeIndianRupee, CalendarDays, ChevronLeft, ChevronRight, Download, CheckCircle2, CreditCard, Dumbbell, LogOut, Moon, Share2, Sparkles, Sun, Tag, Ticket, UserRound, Users } from "lucide-react";
 
 import { apiErrorMessage, endSession } from "../../lib/axios";
 import { logout } from "../../services/authService";
@@ -9,6 +9,8 @@ import { getMyReferrals, type ReferralInfo } from "../../services/referralServic
 import { getActiveSubscription, getSubscriptionHistory, type Subscription } from "../../services/subscriptionService";
 import { getMyProfile, updateMyProfile } from "../../services/userService";
 import { getMyPayments, initiatePayment, verifyMockPayment, type PaymentDetail, type PaymentInitiation } from "../../services/paymentService";
+import ConfirmDialog from "../../components/common/ConfirmDialog";
+import CopyButton from "../../components/common/CopyButton";
 import StaffWorkspace from "./StaffWorkspace";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { useAuthStore, type MemberProfile } from "../../store/authStore";
@@ -30,6 +32,9 @@ export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("fitcore_theme") !== "light");
+  // Sign-out is confirmed here rather than in each header, so the member and
+  // staff workspaces share one dialog and one copy of the wording.
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
@@ -53,10 +58,34 @@ export default function DashboardPage() {
 
   if (!user) return null;
 
+  const requestLogout = () => setConfirmingLogout(true);
+
+  const confirmDialog = (
+    <ConfirmDialog
+      open={confirmingLogout}
+      title="Do you want to sign out?"
+      message="You will need to sign in again to get back in."
+      confirmLabel="Yes"
+      cancelLabel="No"
+      onConfirm={() => { setConfirmingLogout(false); handleLogout(); }}
+      onCancel={() => setConfirmingLogout(false)}
+    />
+  );
+
   if (user.role !== "member") {
-    return <StaffWorkspace user={user} darkMode={darkMode} setDarkMode={setDarkMode} onLogout={handleLogout} />;
+    return (
+      <>
+        <StaffWorkspace user={user} darkMode={darkMode} setDarkMode={setDarkMode} onLogout={requestLogout} />
+        {confirmDialog}
+      </>
+    );
   }
-  return <MemberDashboard darkMode={darkMode} setDarkMode={setDarkMode} onLogout={handleLogout} />;
+  return (
+    <>
+      <MemberDashboard darkMode={darkMode} setDarkMode={setDarkMode} onLogout={requestLogout} />
+      {confirmDialog}
+    </>
+  );
 }
 
 function MemberDashboard({ darkMode, setDarkMode, onLogout }: { darkMode: boolean; setDarkMode: (value: boolean) => void; onLogout: () => void }) {
@@ -180,7 +209,6 @@ function HomeView({ user, subscription, history, plans, attendedDays, expirySoon
         <article className="panel plan-panel">
           <div className="panel-head">
             <p className="eyebrow">Current plan</p>
-            {subscription && <span className="status-dot">Active</span>}
           </div>
           {subscription ? (
             <>
@@ -836,12 +864,7 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
     window.setTimeout(() => { jumpingRef.current = false; }, 700);
   }
 
-  async function copyCode() {
-    if (!referrals) return;
-    await navigator.clipboard?.writeText(referrals.my_referral_code);
-    setNotice("Referral code copied.");
-  }
-
+  /** Fallback for browsers without the share sheet. */
   async function copyLink() {
     if (!referrals) return;
     await navigator.clipboard?.writeText(shareLink);
@@ -899,8 +922,14 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
             <small>{shareLink}</small>
           </div>
           <div className="referral-actions">
-            <button className="icon-button" onClick={copyCode} aria-label="Copy referral code"><Copy size={18} /></button>
-            <button className="share-button" onClick={shareCode}>Share</button>
+            <CopyButton
+              value={referrals.my_referral_code}
+              className="icon-button"
+              title="Copy referral code"
+            />
+            <button className="icon-button share-button" onClick={shareCode} aria-label="Share referral link">
+              <Share2 size={18} />
+            </button>
           </div>
         </div>
         <div className="insight-grid">
@@ -914,7 +943,6 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
       <div id="referral-history" className="jump-target">
         <div className="section-heading">
           <h2>Referral history</h2>
-          <span className="muted">{referrals.referred_members.length} total</span>
         </div>
         <div className="history-list">
           {referrals.referred_members.length ? (
@@ -939,7 +967,6 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
       <div id="offers" className="jump-target">
         <div className="section-heading">
           <h2>Offers</h2>
-          <span className="muted">{coupons.length} available</span>
         </div>
         {coupons.length === 0 ? (
           <div className="empty-state">No offers are running at the moment.</div>
@@ -956,15 +983,7 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
                       {coupon.min_plan_price_paise > 0 && ` · min ${money(coupon.min_plan_price_paise)}`}
                     </small>
                   </div>
-                  <button
-                    className="outline-button compact-button"
-                    onClick={async () => {
-                      await navigator.clipboard?.writeText(coupon.code);
-                      setNotice(`Coupon ${coupon.code} copied — apply it at checkout.`);
-                    }}
-                  >
-                    <Copy size={14} /> Copy
-                  </button>
+                  <CopyButton value={coupon.code} label="Copy" title={`Copy ${coupon.code}`} />
                 </article>
               ))}
             </div>
@@ -1019,7 +1038,7 @@ function ProfileView({ profile, user }: { profile: MemberProfile | null; user: N
     finally { setSaving(false); }
   }
 
-  return <section className="view-stack"><div className="profile-card"><div className="profile-avatar">{(profile?.full_name ?? user.full_name).charAt(0)}</div><div><h3>{profile?.full_name ?? user.full_name}</h3><p>{profile?.email ?? "No email added"}</p><span className="status-dot">{profile?.gym_meta?.membership_status ?? user.membership_status}</span></div><button className="outline-button compact-button" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit profile"}</button></div>{message && <div className="profile-message">{message}</div>}{editing ? <div className="profile-form"><div className="field"><label>Full name</label><input value={form.full_name} onChange={change("full_name")} /></div><div className="field"><label>Phone <span className="optional-label">cannot be changed</span></label><input value={profile?.phone ?? user.phone} disabled /></div><div className="field"><label>Email <span className="optional-label">cannot be changed</span></label><input type="email" value={form.email} disabled /></div><div className="profile-form-grid"><div className="field"><label>Date of birth</label><input type="date" value={form.dob} onChange={change("dob")} /></div><div className="field"><label>Gender</label><input value={form.gender} onChange={change("gender")} placeholder="Not specified" /></div><div className="field"><label>Blood group</label><input value={form.blood_group} onChange={change("blood_group")} placeholder="e.g. B+" /></div><div className="field"><label>Street</label><input value={form.street} onChange={change("street")} /></div><div className="field"><label>City</label><input value={form.city} onChange={change("city")} /></div><div className="field"><label>State</label><input value={form.state} onChange={change("state")} /></div><div className="field"><label>Pincode</label><input value={form.pincode} onChange={change("pincode")} /></div></div><button className="primary-action" onClick={saveProfile} disabled={saving}>{saving ? "Saving..." : "Save changes"}</button></div> : <><div className="detail-list"><Detail label="Phone" value={profile?.phone ?? user.phone} /><Detail label="Email" value={profile?.email ?? "Not added"} /><Detail label="Date of birth" value={dateLabel(profile?.profile?.dob)} /><Detail label="Gender" value={profile?.profile?.gender ?? "Not added"} /><Detail label="Blood group" value={profile?.profile?.blood_group ?? "Not added"} /><Detail label="Address" value={[profile?.profile?.address?.street, profile?.profile?.address?.city, profile?.profile?.address?.state, profile?.profile?.address?.pincode].filter(Boolean).join(", ") || "Not added"} /><Detail label="Role" value={profile?.role === "owner" ? "Admin" : profile?.role ?? "Member"} /><Detail label="Member since" value={dateLabel(profile?.gym_meta?.joined_on)} /><Detail label="Assigned trainer" value={profile?.gym_meta?.assigned_trainer_name ?? "Not assigned"} /><Detail label="Referral code" value={profile?.my_referral_code ?? "Not available"} /><Detail label="Loyalty points" value={`${profile?.loyalty_points ?? 0} points`} /><Detail label="Active subscription" value={profile?.active_subscription_id ? "Active" : "None"} /></div><div className="later-card"><Sparkles size={20} /><div><strong>Rewards history is coming next.</strong><p>We will connect your membership age, gym days, and plans bought when the Rewards API is ready.</p></div></div></>}</section>;
+  return <section className="view-stack"><div className="profile-card"><div className="profile-avatar">{(profile?.full_name ?? user.full_name).charAt(0)}</div><div><h3>{profile?.full_name ?? user.full_name}</h3><p>{profile?.email ?? "No email added"}</p><span className="status-dot">{profile?.gym_meta?.membership_status ?? user.membership_status}</span></div><button className="outline-button compact-button" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit profile"}</button></div>{message && <div className="profile-message">{message}</div>}{editing ? <div className="profile-form"><div className="field"><label>Full name</label><input value={form.full_name} onChange={change("full_name")} /></div><div className="field"><label>Phone <span className="optional-label">cannot be changed</span></label><input value={profile?.phone ?? user.phone} disabled /></div><div className="field"><label>Email <span className="optional-label">cannot be changed</span></label><input type="email" value={form.email} disabled /></div><div className="profile-form-grid"><div className="field"><label>Date of birth</label><input type="date" value={form.dob} onChange={change("dob")} /></div><div className="field"><label>Gender</label><input value={form.gender} onChange={change("gender")} placeholder="Not specified" /></div><div className="field"><label>Blood group</label><input value={form.blood_group} onChange={change("blood_group")} placeholder="e.g. B+" /></div><div className="field"><label>Street</label><input value={form.street} onChange={change("street")} /></div><div className="field"><label>City</label><input value={form.city} onChange={change("city")} /></div><div className="field"><label>State</label><input value={form.state} onChange={change("state")} /></div><div className="field"><label>Pincode</label><input value={form.pincode} onChange={change("pincode")} /></div></div><button className="primary-action" onClick={saveProfile} disabled={saving}>{saving ? "Saving..." : "Save changes"}</button></div> : <><div className="detail-list"><Detail label="Phone" value={profile?.phone ?? user.phone} /><Detail label="Email" value={profile?.email ?? "Not added"} /><Detail label="Date of birth" value={dateLabel(profile?.profile?.dob)} /><Detail label="Gender" value={profile?.profile?.gender ?? "Not added"} /><Detail label="Blood group" value={profile?.profile?.blood_group ?? "Not added"} /><Detail label="Address" value={[profile?.profile?.address?.street, profile?.profile?.address?.city, profile?.profile?.address?.state, profile?.profile?.address?.pincode].filter(Boolean).join(", ") || "Not added"} /><Detail label="Role" value={profile?.role === "owner" ? "Admin" : profile?.role ?? "Member"} /><Detail label="Member since" value={dateLabel(profile?.gym_meta?.joined_on)} /><Detail label="Assigned trainer" value={profile?.gym_meta?.assigned_trainer_name ?? "Not assigned"} /><Detail label="Referral code" value={profile?.my_referral_code ?? "Not available"} /><Detail label="Loyalty points" value={`${profile?.loyalty_points ?? 0} points`} /><Detail label="Active subscription" value={profile?.active_subscription_id ? "Active" : "None"} /></div></>}</section>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) { return <div className="detail-row"><span>{label}</span><strong>{value}</strong></div>; }

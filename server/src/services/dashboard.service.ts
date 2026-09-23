@@ -8,6 +8,7 @@
  * a dashboard load is a handful of round trips rather than one per row.
  */
 import { ROLES, SUBSCRIPTION_STATUS } from "../config/constants.js";
+import type { UserDoc } from "../models/User.js";
 import type {
   OwnerDashboardResponse,
   PopularPlanInfo,
@@ -19,6 +20,7 @@ import {
   subscriptionRepository,
   userRepository,
 } from "../repositories/index.js";
+import { settingService } from "./setting.service.js";
 import {
   addDaysToDateStr,
   getTodayStr,
@@ -34,6 +36,24 @@ const EXPIRING_SOON_DAYS = 7;
 function revenueChangePercent(thisMonth: number, lastMonth: number): number {
   if (lastMonth <= 0) return 0;
   return Math.round(((thisMonth - lastMonth) / lastMonth) * 1000) / 10;
+}
+
+/**
+ * The member ids a trainer's dashboard should count, or undefined for no
+ * restriction.
+ *
+ * Returns undefined for an owner and for a trainer the visibility policy
+ * exempts, so their queries stay unfiltered rather than paying for a list of
+ * every member in the gym.
+ */
+async function resolveScopedMemberIds(
+  caller: UserDoc,
+): Promise<string[] | undefined> {
+  if (caller.role !== ROLES.TRAINER) return undefined;
+  if (await settingService.trainerSeesAllMembers(String(caller._id))) {
+    return undefined;
+  }
+  return userRepository.listMemberIdsByTrainer(String(caller._id));
 }
 
 export const dashboardService = {
@@ -114,15 +134,29 @@ export const dashboardService = {
     };
   },
 
-  /** The floor view: today's attendance, renewals due, and the last check-in. */
-  async getTrainerDashboard(): Promise<TrainerDashboardResponse> {
+  /**
+   * The floor view: today's attendance, renewals due, and the last check-in.
+   *
+   * Scoped to the calling trainer's assigned members, under the same policy as
+   * the member list — otherwise every trainer sees identical gym-wide numbers.
+   * An owner, or a trainer the policy exempts, still sees the whole floor.
+   */
+  async getTrainerDashboard(caller: UserDoc): Promise<TrainerDashboardResponse> {
     const todayStr = getTodayStr();
     const expiringCutoff = addDaysToDateStr(todayStr, EXPIRING_SOON_DAYS);
 
+    // undefined means "no restriction"; an empty array would mean "nobody",
+    // which is the right answer for a trainer with no members yet.
+    const scopedMemberIds = await resolveScopedMemberIds(caller);
+
     const [checkinsToday, expiringCount, subsToday] = await Promise.all([
-      subscriptionRepository.countWithAttendanceOn(todayStr),
-      subscriptionRepository.countExpiringBetween(todayStr, expiringCutoff),
-      subscriptionRepository.listWithAttendanceOn(todayStr),
+      subscriptionRepository.countWithAttendanceOn(todayStr, scopedMemberIds),
+      subscriptionRepository.countExpiringBetween(
+        todayStr,
+        expiringCutoff,
+        scopedMemberIds,
+      ),
+      subscriptionRepository.listWithAttendanceOn(todayStr, scopedMemberIds),
     ]);
 
     // Find today's most recent entry across all subscriptions.

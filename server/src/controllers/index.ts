@@ -8,3 +8,4 @@ export { paymentController } from "./payment.controller.js";
 export { couponController } from "./coupon.controller.js";
 export { referralController } from "./referral.controller.js";
 export { dashboardController } from "./dashboard.controller.js";
+export { settingController } from "./setting.controller.js";

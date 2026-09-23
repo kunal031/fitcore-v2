@@ -1,12 +1,16 @@
 /**
  * Subscription queries.
  *
- * Calendar dates are stored as `YYYY-MM-DD` strings, which compare correctly
- * with `$lt`/`$gte` because the format is lexicographically ordered.
+ * Calendar dates (`starts_on`, `expires_on`) are stored two ways: Node-era
+ * records hold `YYYY-MM-DD` strings, Python-era ones hold BSON dates. Any
+ * range filter on them goes through `calendarDateRangeFilter`, which matches
+ * both forms — a bound of one form silently skips the other.
  */
 import type { Types } from "mongoose";
 
 import { SUBSCRIPTION_STATUS } from "../config/constants.js";
+import { calendarDateRangeFilter } from "../utils/date.js";
+import { toObjectId } from "../utils/objectId.js";
 import {
   Subscription,
   type ISubscription,
@@ -41,40 +45,130 @@ export const subscriptionRepository = {
     return Subscription.create(data);
   },
 
-  /** Active subscriptions expiring between today and `targetDate`, inclusive. */
-  listExpiringBetween(today: string, targetDate: string): Promise<SubscriptionDoc[]> {
-    return Subscription.find({
-      status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $gte: today, $lte: targetDate },
-    }).exec();
+  /**
+   * Active subscriptions expiring between today and `targetDate`, inclusive.
+   *
+   * Goes through the raw driver to find the matching ids, then re-reads them
+   * as documents: the mixed-form bounds cannot survive Mongoose's casting, but
+   * callers still expect hydrated documents.
+   */
+  async listExpiringBetween(
+    today: string,
+    targetDate: string,
+  ): Promise<SubscriptionDoc[]> {
+    const ids = await this.idsExpiringBetween(today, targetDate);
+    if (ids.length === 0) return [];
+    return Subscription.find({ _id: { $in: ids } }).exec();
   },
 
-  countExpiringBetween(today: string, targetDate: string): Promise<number> {
-    return Subscription.countDocuments({
+  countExpiringBetween(
+    today: string,
+    targetDate: string,
+    userIds?: string[],
+  ): Promise<number> {
+    return Subscription.collection.countDocuments({
       status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $gte: today, $lte: targetDate },
-    }).exec();
+      ...calendarDateRangeFilter("expires_on", { gte: today, lte: targetDate }),
+      // Ids are cast explicitly: this runs on the raw driver, which does no
+      // schema casting, so a string id would match nothing.
+      ...(userIds ? { user_id: { $in: userIds.map((id) => toObjectId(id)) } } : {}),
+    });
+  },
+
+  /** Ids only, for callers that re-read or count rather than hydrate. */
+  async idsExpiringBetween(today: string, targetDate: string): Promise<Types.ObjectId[]> {
+    const rows = await Subscription.collection
+      .find(
+        {
+          status: SUBSCRIPTION_STATUS.ACTIVE,
+          ...calendarDateRangeFilter("expires_on", { gte: today, lte: targetDate }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .toArray();
+    return rows.map((row) => row._id as Types.ObjectId);
   },
 
   /** Active subscriptions whose window has already closed. Drives the nightly sweep. */
-  listCalendarExpired(today: string): Promise<SubscriptionDoc[]> {
-    return Subscription.find({
-      status: SUBSCRIPTION_STATUS.ACTIVE,
-      expires_on: { $lt: today },
-    }).exec();
+  async listCalendarExpired(today: string): Promise<SubscriptionDoc[]> {
+    const rows = await Subscription.collection
+      .find(
+        {
+          status: SUBSCRIPTION_STATUS.ACTIVE,
+          ...calendarDateRangeFilter("expires_on", { lt: today }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .toArray();
+    if (rows.length === 0) return [];
+    return Subscription.find({ _id: { $in: rows.map((row) => row._id) } }).exec();
+  },
+
+  /**
+   * The most recent subscription for each of the given users, as a user-keyed
+   * map.
+   *
+   * One query for the whole set rather than one per member: the staff member
+   * table shows a plan and status per row, and a lookup per row would fire a
+   * request per member on every render.
+   *
+   * "Most recent" is by creation, and an active subscription always wins over
+   * a finished one — a member who renewed after lapsing should read as active,
+   * not expired.
+   */
+  async findLatestByUserIds(
+    userIds: (Types.ObjectId | string)[],
+  ): Promise<Map<string, SubscriptionDoc>> {
+    if (userIds.length === 0) return new Map();
+    const unique = [...new Set(userIds.map(String))];
+    const rows = await Subscription.find({ user_id: { $in: unique } })
+      .sort({ created_at: -1 })
+      .exec();
+
+    const latest = new Map<string, SubscriptionDoc>();
+    for (const row of rows) {
+      const key = String(row.user_id);
+      const held = latest.get(key);
+      if (!held) {
+        latest.set(key, row);
+        continue;
+      }
+      // Rows arrive newest-first, so only an active one displaces what is held.
+      if (
+        held.status !== SUBSCRIPTION_STATUS.ACTIVE &&
+        row.status === SUBSCRIPTION_STATUS.ACTIVE
+      ) {
+        latest.set(key, row);
+      }
+    }
+    return latest;
   },
 
   countByStatus(status: string): Promise<number> {
     return Subscription.countDocuments({ status }).exec();
   },
 
-  /** Subscriptions with an attendance entry on the given date. */
-  listWithAttendanceOn(dateStr: string): Promise<SubscriptionDoc[]> {
-    return Subscription.find({ "attendance_log.date": dateStr }).exec();
+  /**
+   * Subscriptions with an attendance entry on the given date.
+   *
+   * `userIds`, when given, restricts the result to those members — the trainer
+   * dashboard counts only the members that trainer is responsible for.
+   */
+  listWithAttendanceOn(
+    dateStr: string,
+    userIds?: string[],
+  ): Promise<SubscriptionDoc[]> {
+    return Subscription.find({
+      "attendance_log.date": dateStr,
+      ...(userIds ? { user_id: { $in: userIds } } : {}),
+    }).exec();
   },
 
-  countWithAttendanceOn(dateStr: string): Promise<number> {
-    return Subscription.countDocuments({ "attendance_log.date": dateStr }).exec();
+  countWithAttendanceOn(dateStr: string, userIds?: string[]): Promise<number> {
+    return Subscription.countDocuments({
+      "attendance_log.date": dateStr,
+      ...(userIds ? { user_id: { $in: userIds } } : {}),
+    }).exec();
   },
 
   /**

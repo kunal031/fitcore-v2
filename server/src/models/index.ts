@@ -22,3 +22,4 @@ export {
   type IPasswordResetOtp,
   type PasswordResetOtpDoc,
 } from "./PasswordResetOtp.js";
+export { Setting, type ISetting, type SettingDoc } from "./Setting.js";

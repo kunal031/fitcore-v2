@@ -8,6 +8,7 @@ import type { FilterQuery, Types } from "mongoose";
 
 import { ROLES } from "../config/constants.js";
 import { User, type IUser, type UserDoc } from "../models/User.js";
+import { toObjectId } from "../utils/objectId.js";
 import { escapeRegex } from "../utils/phone.js";
 
 export interface ListUsersFilters {
@@ -16,6 +17,8 @@ export interface ListUsersFilters {
   search?: string | undefined;
   role?: string | undefined;
   membershipStatus?: string | undefined;
+  /** Restrict to the members assigned to this trainer. */
+  assignedTrainerId?: string | undefined;
 }
 
 export const userRepository = {
@@ -51,6 +54,13 @@ export const userRepository = {
     if (filters.role) query.role = filters.role;
     if (filters.membershipStatus) {
       query["gym_meta.membership_status"] = filters.membershipStatus;
+    }
+    if (filters.assignedTrainerId) {
+      query["gym_meta.assigned_trainer_id"] = toObjectId(
+        filters.assignedTrainerId,
+        "Invalid trainer id",
+        "INVALID_TRAINER",
+      );
     }
     if (filters.search) {
       const pattern = escapeRegex(filters.search);
@@ -90,16 +100,14 @@ export const userRepository = {
   /**
    * Members who joined on or after the given calendar date.
    *
-   * `joined_on` is stored two ways: current records hold a YYYY-MM-DD
-   * string, while those created under an earlier schema hold a BSON
-   * date. MongoDB
-   * compares across BSON types by type order, so a single `$gte` matches only
-   * one of them — a string bound silently skips every date record, and the
-   * count came back near zero.
+   * Matches `joined_on` in both stored forms. A migrated database holds only
+   * strings, but an unmigrated one can still hold BSON dates, and MongoDB
+   * compares across BSON types by type order — so a string bound alone would
+   * silently skip every date record and the count would come back near zero.
    *
    * The query goes through the raw driver because the schema declares this
    * field a string, so Mongoose would cast the Date bound back to a string
-   * and reintroduce the mismatch.
+   * and reintroduce the mismatch. See `calendarDateRangeFilter`.
    */
   countMembersJoinedSince(dateStr: string): Promise<number> {
     return User.collection.countDocuments({
@@ -145,10 +153,38 @@ export const userRepository = {
     return this.listMembersByIds(rows.map((row) => String(row._id)));
   },
 
+  /** Ids of the members assigned to one trainer. */
+  async listMemberIdsByTrainer(trainerId: string): Promise<string[]> {
+    const ids = await User.distinct("_id", {
+      role: ROLES.MEMBER,
+      "gym_meta.assigned_trainer_id": toObjectId(
+        trainerId,
+        "Invalid trainer id",
+        "INVALID_TRAINER",
+      ),
+    }).exec();
+    return ids.map(String);
+  },
+
   /** Ids of every member, for set arithmetic against subscription holders. */
   async listMemberIds(): Promise<string[]> {
     const ids = await User.distinct("_id", { role: ROLES.MEMBER }).exec();
     return ids.map(String);
+  },
+
+  /**
+   * Trainer names for a set of ids, as an id-keyed map.
+   *
+   * Used to fill `assigned_trainer_name` across a whole page of users in one
+   * query rather than one per row.
+   */
+  async findNamesByIds(
+    ids: (Types.ObjectId | string)[],
+  ): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const unique = [...new Set(ids.map(String))];
+    const rows = await User.find({ _id: { $in: unique } }, { full_name: 1 }).exec();
+    return new Map(rows.map((row) => [String(row._id), row.full_name]));
   },
 
   countByRole(role: string): Promise<number> {

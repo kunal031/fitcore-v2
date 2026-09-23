@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx src/scripts/seed.ts",
     "demo": "tsx src/scripts/demoData.ts",
+    "normalize-dates": "tsx src/scripts/normalizeDates.ts",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
