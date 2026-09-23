@@ -750,3 +750,14 @@ article.coupon-row > .outline-button { grid-column: 2; grid-row: 1 / span 2; ali
 /* A copy control confirms on itself; the accent marks the moment it lands. */
 .is-copied { color: var(--accent); border-color: var(--accent); }
 .icon-button.share-button { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
+
+/* Auth: a label with an action beside it, and the reset confirmation mark.
+   Scoped to .auth-layout, which keeps its own amber palette — an unscoped
+   var(--accent) here would put the app's green into these screens. */
+.auth-layout .field-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.auth-layout .field-link { color: #a8760a; font-size: 12.5px; font-weight: 700; text-decoration: none; }
+.auth-layout .field-link:hover { text-decoration: underline; }
+.auth-layout .auth-success { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 16px; border-radius: 50%; color: #102a43; background: #f2c14e; }
+.auth-layout .text-button { display: inline-flex; align-items: center; gap: 4px; padding: 0; color: #a8760a; font-size: inherit; font-weight: 700; }
+.auth-layout .text-button:hover { text-decoration: underline; }
+.auth-layout .text-button:disabled { opacity: .5; cursor: wait; text-decoration: none; }

@@ -1,20 +1,24 @@
 /**
  * Password-reset OTP issuing and verification.
  *
- * Mirrors the inline OTP logic in `server/app/api/v1/routes/auth.py`.
+ * The code is emailed, never logged and never returned. An account with no
+ * email on file therefore cannot self-serve a reset — an admin changes the
+ * password for them — which is the accepted trade-off for not having an SMS
+ * provider.
  *
- * SMS delivery is mocked: the generated code is written to the log rather than
- * sent. Before this reaches production the `logger.info` below must be replaced
- * with a real SMS provider call, or every reset code will sit in the logs.
+ * Records still key on phone, because the phone is the account's identity and
+ * the reset token's subject. Email is only how the code travels.
  */
 import { OTP_EXPIRY_MINUTES, OTP_MAX_ATTEMPTS } from "../config/constants.js";
 import type { VerifyOtpInput } from "../dtos/auth.dto.js";
-import { otpRepository } from "../repositories/index.js";
+import { otpRepository, userRepository } from "../repositories/index.js";
 import { getUtcNow } from "../utils/date.js";
 import { generateOtp } from "../utils/generators.js";
 import { createPasswordResetToken } from "../utils/jwt.js";
 import { logger } from "../utils/logger.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
+import { emailService } from "./email.service.js";
+import { buildPasswordResetEmail } from "./templates/passwordResetEmail.js";
 
 /**
  * Result of a verification attempt.
@@ -28,27 +32,52 @@ export type VerifyOtpResult =
 
 export const otpService = {
   /**
-   * Issue an OTP for a phone number.
+   * Email a reset code to whoever owns this address.
    *
-   * Returns nothing about whether the number is registered, so the endpoint
-   * cannot be used to discover which numbers have accounts.
+   * Returns nothing in every case — unknown address, known address, failed
+   * send — so the endpoint cannot be used to discover which emails have
+   * accounts. Problems are logged for the operator instead.
+   *
+   * No OTP record is written unless there is an account to reset, so an
+   * unknown address costs one lookup rather than a row and a hash.
    */
-  async sendOtp(phone: string): Promise<void> {
+  async sendOtpToEmail(email: string): Promise<void> {
+    const user = await userRepository.findByEmail(email);
+    if (!user) {
+      logger.info("Password reset requested for an address with no account.");
+      return;
+    }
+
     const otp = generateOtp();
     const expiresAt = new Date(
       getUtcNow().getTime() + OTP_EXPIRY_MINUTES * 60 * 1000,
     );
 
     await otpRepository.create({
-      phone,
+      phone: user.phone,
       otp_hash: await hashPassword(otp),
       expires_at: expiresAt,
       attempts: 0,
       consumed: false,
     });
 
-    // Mock SMS delivery — development only.
-    logger.info(`Password reset OTP generated for ${phone}: ${otp}`);
+    const message = buildPasswordResetEmail(user.full_name, otp);
+    const sent = await emailService.send({
+      to: user.email ?? email,
+      toName: user.full_name,
+      subject: message.subject,
+      html: message.html,
+      text: message.text,
+    });
+
+    if (!sent) {
+      // The caller is told nothing, so this line is the only trace that a
+      // user asked for a reset and did not get one.
+      logger.error(
+        { userId: String(user._id) },
+        "Password reset code could not be delivered.",
+      );
+    }
   },
 
   /**
@@ -59,7 +88,14 @@ export const otpService = {
    * the record is refused once it reaches the cap.
    */
   async verifyOtp(payload: VerifyOtpInput): Promise<VerifyOtpResult> {
-    const record = await otpRepository.findLatestUnconsumed(payload.phone);
+    // An unknown address reads exactly like a wrong code, so verification
+    // cannot be used to discover which emails have accounts either.
+    const user = await userRepository.findByEmail(payload.email);
+    if (!user) {
+      return { verified: false, message: "The OTP is invalid or expired." };
+    }
+
+    const record = await otpRepository.findLatestUnconsumed(user.phone);
 
     if (!record || record.expires_at <= getUtcNow()) {
       return { verified: false, message: "The OTP is invalid or expired." };
@@ -81,7 +117,9 @@ export const otpService = {
 
     return {
       verified: true,
-      resetToken: createPasswordResetToken(payload.phone),
+      // Subject stays the phone: it is the account's identity, and
+      // resetPassword resolves the same way.
+      resetToken: createPasswordResetToken(user.phone),
       message: "OTP verified successfully.",
     };
   },
