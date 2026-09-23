@@ -9,6 +9,7 @@ import { getMyReferrals, type ReferralInfo } from "../../services/referralServic
 import { getActiveSubscription, getSubscriptionHistory, type Subscription } from "../../services/subscriptionService";
 import { getMyProfile, updateMyProfile } from "../../services/userService";
 import { getMyPayments, initiatePayment, verifyMockPayment, type PaymentDetail, type PaymentInitiation } from "../../services/paymentService";
+import ConfirmDialog from "../../components/common/ConfirmDialog";
 import StaffWorkspace from "./StaffWorkspace";
 import { useTabRoute } from "../../hooks/useTabRoute";
 import { useAuthStore, type MemberProfile } from "../../store/authStore";
@@ -30,6 +31,9 @@ export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("fitcore_theme") !== "light");
+  // Sign-out is confirmed here rather than in each header, so the member and
+  // staff workspaces share one dialog and one copy of the wording.
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
@@ -53,10 +57,34 @@ export default function DashboardPage() {
 
   if (!user) return null;
 
+  const requestLogout = () => setConfirmingLogout(true);
+
+  const confirmDialog = (
+    <ConfirmDialog
+      open={confirmingLogout}
+      title="Do you want to sign out?"
+      message="You will need to sign in again to get back in."
+      confirmLabel="Yes"
+      cancelLabel="No"
+      onConfirm={() => { setConfirmingLogout(false); handleLogout(); }}
+      onCancel={() => setConfirmingLogout(false)}
+    />
+  );
+
   if (user.role !== "member") {
-    return <StaffWorkspace user={user} darkMode={darkMode} setDarkMode={setDarkMode} onLogout={handleLogout} />;
+    return (
+      <>
+        <StaffWorkspace user={user} darkMode={darkMode} setDarkMode={setDarkMode} onLogout={requestLogout} />
+        {confirmDialog}
+      </>
+    );
   }
-  return <MemberDashboard darkMode={darkMode} setDarkMode={setDarkMode} onLogout={handleLogout} />;
+  return (
+    <>
+      <MemberDashboard darkMode={darkMode} setDarkMode={setDarkMode} onLogout={requestLogout} />
+      {confirmDialog}
+    </>
+  );
 }
 
 function MemberDashboard({ darkMode, setDarkMode, onLogout }: { darkMode: boolean; setDarkMode: (value: boolean) => void; onLogout: () => void }) {
