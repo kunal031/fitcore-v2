@@ -7,7 +7,7 @@
 ## 1. The Honest Truth: Is Caching Necessary?
 
 ### For Day 1 (100–500 members):
-- **Not mandatory to make the app work.** FastAPI + MongoDB Atlas on local development or low volume can handle traffic without caching.
+- **Not mandatory to make the app work.** Express + MongoDB Atlas on local development or low volume can handle traffic without caching.
 
 ### For Production & Portfolio Quality (Product Company Standard):
 - **YES, targeted caching is essential.**
@@ -91,11 +91,11 @@ Never cache these endpoints. Doing so will cause severe financial or operational
 
 ---
 
-## 5. Technology Recommendation for FitCore v2
+## 5. Technology Recommendation for FitCore
 
 ### Option A: In-Memory Caching (Zero Extra Cost — Recommended for Now)
-- **Tool:** `cachetools` (Python library).
-- **How it works:** Keeps cached objects directly in FastAPI process RAM.
+- **Tool:** `node-cache` or an equivalent in-process store.
+- **How it works:** Keeps cached objects directly in the Node process RAM.
 - **Pros:** 0 additional servers, 0 cost, sub-millisecond speed.
 - **Cons:** Cache clears on server restart.
 

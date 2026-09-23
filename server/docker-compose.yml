@@ -24,6 +24,8 @@ services:
     env_file:
       - .env
     environment:
+      # Override the host from .env: inside the compose network the database
+      # is reachable by service name, not on localhost.
       MONGODB_URI: mongodb://mongodb:27017
     ports:
       - "8000:8000"

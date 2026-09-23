@@ -18,3 +18,11 @@ venv/
 
 # Editor / OS
 .DS_Store
+
+# Local agent notes, not part of the project
+CLAUDE.md
+
+#  docs also 
+docs/
+server/README.md
+server/KNOWN_ISSUES.md

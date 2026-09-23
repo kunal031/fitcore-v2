@@ -1,6 +1,6 @@
-# 📖 FitCore v2 — Complete Backend Route Encyclopedia (All Endpoints)
+# FitCore — Backend Route Encyclopedia (All Endpoints)
 
-This document is the **single source of truth** connecting the FastAPI backend to the React frontend. Every single screen, button, form, and modal in the frontend corresponds to one of these routes.
+This document is the **single source of truth** connecting the backend to the React frontend. Every single screen, button, form, and modal in the frontend corresponds to one of these routes.
 
 ---
 
