@@ -208,7 +208,6 @@ function HomeView({ user, subscription, history, plans, attendedDays, expirySoon
         <article className="panel plan-panel">
           <div className="panel-head">
             <p className="eyebrow">Current plan</p>
-            {subscription && <span className="status-dot">Active</span>}
           </div>
           {subscription ? (
             <>
@@ -942,7 +941,6 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
       <div id="referral-history" className="jump-target">
         <div className="section-heading">
           <h2>Referral history</h2>
-          <span className="muted">{referrals.referred_members.length} total</span>
         </div>
         <div className="history-list">
           {referrals.referred_members.length ? (
@@ -967,7 +965,6 @@ function ReferralView({ referrals, coupons }: { referrals: ReferralInfo | null; 
       <div id="offers" className="jump-target">
         <div className="section-heading">
           <h2>Offers</h2>
-          <span className="muted">{coupons.length} available</span>
         </div>
         {coupons.length === 0 ? (
           <div className="empty-state">No offers are running at the moment.</div>

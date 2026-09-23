@@ -543,7 +543,6 @@ function PlanManager() {
 				<h3>{plan.plan_name}</h3>
 				<p>{plan.description || "No description."}</p>
 				<div className="plan-meta"><span>{plan.calendar_days} calendar days</span><span>{plan.allocated_days} gym visits</span></div>
-				<span className={plan.is_active ? "status-dot" : "status-dot failed"}>{plan.is_active ? "Active" : "Archived"}</span>
 				<div className="form-actions">
 					<button className="outline-button compact-button" onClick={() => startEdit(plan)}>Edit</button>
 					<button className="outline-button compact-button" onClick={() => toggleActive(plan)}>{plan.is_active ? "Deactivate" : "Activate"}</button>
@@ -655,7 +654,6 @@ function CouponManager() {
 			<div id="active-coupons" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Coupon management</p><h2>Active coupons</h2></div>
-					<span className="muted">{activeCoupons.length} running</span>
 				</div>
 				{loading ? <div className="loading-state">Loading coupons...</div>
 					: activeCoupons.length === 0 ? <div className="empty-state">No active coupons. Add one below.</div>
@@ -665,7 +663,6 @@ function CouponManager() {
 			<div id="inactive-coupons" className="jump-target">
 				<div className="section-heading">
 					<div><p className="eyebrow">Archived</p><h2>Inactive coupons</h2></div>
-					<span className="muted">{inactiveCoupons.length} archived</span>
 				</div>
 				{inactiveCoupons.length === 0
 					? <div className="empty-state">No inactive coupons.</div>
@@ -713,7 +710,6 @@ function CouponManager() {
 			<article className="coupon-row" key={coupon.id}>
 				<div className="coupon-row-main">
 					<div><strong>{coupon.code}</strong><span>{coupon.name} · {discountLabel(coupon)}</span></div>
-					<span className={coupon.is_active ? "status-dot" : "status-dot failed"}>{coupon.is_active ? "Active" : "Inactive"}</span>
 				</div>
 				<div className="coupon-row-meta">
 					<span>Used {coupon.current_uses}/{coupon.max_uses}</span>
