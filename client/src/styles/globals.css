@@ -1,15 +1,9 @@
 :root {
-	font-family: "Avenir Next", "Trebuchet MS", sans-serif;
-	color: #17324d;
-	background: #f4f7f5;
-	font-synthesis: none;
-	text-rendering: optimizeLegibility;
-}
-
-:root {
 	font-family: "Avenir Next", "DM Sans", sans-serif;
 	color: #f1f5f4;
-	background: #111516;
+	/* Declared after the custom properties below, in the html rule, so the
+	   canvas follows the active theme rather than being pinned to the dark
+	   literal this used to hold. */
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
 	--bg: #111516;
@@ -26,6 +20,13 @@
 :root { --header-h: 67px; --sidebar-w: 216px; }
 :root[data-theme="light"] { --bg: #f3f6f2; --surface: #ffffff; --surface-raised: #e8eee8; --line: rgba(20, 31, 30, .12); --text: #17211f; --muted: #60706c; --accent: #78ad00; --accent-ink: #fff; --danger: #b53e36; }
 * { box-sizing: border-box; }
+/* The canvas behind the document takes its colour from `html`, not `body`.
+   Without it, flicking past the top on macOS rubber-banded the page away and
+   exposed the browser's own base colour — a black band above a dark theme.
+   `overscroll-behavior-y` stops that bounce happening at all; the background
+   stays as the backstop, since the sidebar and nav are fixed and would
+   otherwise detach from the page as it slid. */
+html { background: var(--bg); color: var(--text); overscroll-behavior-y: none; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
 button, input { font: inherit; }
 button { cursor: pointer; }
