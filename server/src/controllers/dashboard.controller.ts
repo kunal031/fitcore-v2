@@ -1,7 +1,7 @@
 /** Dashboard HTTP handlers. */
 import type { Request, Response } from "express";
 
-import { asyncHandler } from "../middleware/index.js";
+import { asyncHandler, currentUser } from "../middleware/index.js";
 import { MEMBER_COHORTS, type MemberCohort } from "../dtos/dashboard.dto.js";
 import { analyticsService, dashboardService } from "../services/index.js";
 import { success } from "../utils/apiResponse.js";
@@ -32,8 +32,13 @@ export const dashboardController = {
     res.json(success(await analyticsService.getMemberCohort(cohort)));
   }),
 
-  /** GET /dashboard/trainer — today's floor view. Trainer or owner. */
-  getTrainerDashboard: asyncHandler(async (_req: Request, res: Response) => {
-    res.json(success(await dashboardService.getTrainerDashboard()));
+  /**
+   * GET /dashboard/trainer — today's floor view. Trainer or owner.
+   *
+   * The caller is passed through so a trainer's numbers cover their own
+   * members rather than the whole gym.
+   */
+  getTrainerDashboard: asyncHandler(async (req: Request, res: Response) => {
+    res.json(success(await dashboardService.getTrainerDashboard(currentUser(req))));
   }),
 };

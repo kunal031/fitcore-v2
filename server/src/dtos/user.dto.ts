@@ -60,6 +60,18 @@ export const listUsersQuerySchema = z.object({
   search: z.string().optional(),
   role: z.string().optional(),
   status: z.string().optional(),
+  /**
+   * Restrict to the members assigned to one trainer.
+   *
+   * An owner may pass any trainer id. For a trainer the service applies its
+   * own scoping regardless, so this cannot be used to widen what they see.
+   */
+  assigned_trainer_id: objectIdSchema.optional(),
+  /**
+   * Opt into the member's current plan on each row. Off by default, so the
+   * lists that do not need it do not pay for the extra query.
+   */
+  include: z.literal("subscription").optional(),
 });
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
@@ -84,8 +96,30 @@ export interface GymMetaRead {
   joined_on: string;
   membership_status: string;
   assigned_trainer_id: string | null;
-  /** Resolved only by `GET /users/me`; null elsewhere. */
+  /** Resolved by `GET /users/me` and, in one batched lookup, by the list. */
   assigned_trainer_name: string | null;
+}
+
+/**
+ * The member's current plan, folded into a list row.
+ *
+ * Present only when the caller asks for it, and null for a member who has
+ * never bought a plan.
+ *
+ * `status` is the subscription's own status, not a boolean: a plan ends on two
+ * independent axes, and an `exhausted` member (visit quota spent) is a
+ * different case from an `expired` one (calendar window closed). Collapsing
+ * the two would label an exhausted member active.
+ */
+export interface MemberSubscriptionSummary {
+  subscription_id: string;
+  plan_name: string;
+  status: string;
+  /** Visit quota left. */
+  days_remaining: number;
+  /** Calendar days left — a different number from the quota. */
+  days_until_expiry: number;
+  expires_on: string;
 }
 
 export interface UserRead {
@@ -100,6 +134,8 @@ export interface UserRead {
   my_referral_code: string;
   loyalty_points: number;
   is_active: boolean;
+  /** Set only when the list was asked for `include=subscription`. */
+  subscription?: MemberSubscriptionSummary | null;
 }
 
 export interface MemberQrRead {
