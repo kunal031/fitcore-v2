@@ -6,3 +6,4 @@ export { paymentRepository } from "./payment.repository.js";
 export { couponRepository } from "./coupon.repository.js";
 export { referralRepository } from "./referral.repository.js";
 export { otpRepository } from "./otp.repository.js";
+export { settingRepository } from "./setting.repository.js";

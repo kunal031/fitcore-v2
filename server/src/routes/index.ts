@@ -15,6 +15,7 @@ import { paymentRoutes } from "./payment.routes.js";
 import { planRoutes } from "./plan.routes.js";
 import { referralRoutes } from "./referral.routes.js";
 import { subscriptionRoutes } from "./subscription.routes.js";
+import { settingRoutes } from "./setting.routes.js";
 import { userRoutes } from "./user.routes.js";
 
 export const apiV1Router = Router();
@@ -28,3 +29,4 @@ apiV1Router.use("/payments", paymentRoutes);
 apiV1Router.use("/coupons", couponRoutes);
 apiV1Router.use("/referrals", referralRoutes);
 apiV1Router.use("/dashboard", dashboardRoutes);
+apiV1Router.use("/settings", settingRoutes);
