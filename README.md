@@ -4,7 +4,6 @@ Gym and fitness membership portal: plan sales, subscriptions, attendance trackin
 
 - `server/` — Node.js + Express + TypeScript, MongoDB via Mongoose
 - `client/` — React + TypeScript + Vite
-- `docs/` — route reference, frontend API map, caching notes
 
 ## Requirements
 
@@ -126,7 +125,8 @@ Every endpoint returns the same envelope:
 
 On failure, `error` carries `{ code, message, field }`. Clients branch on `error.code`, which is stable, never on message text.
 
-Full request and response documentation is in `docs/backend_routes_encyclopedia.md`.
+Every route is declared in `server/src/routes/`, with its request and response
+shapes in the matching `server/src/dtos/` module.
 
 ## Deployment
 
