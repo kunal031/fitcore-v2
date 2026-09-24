@@ -185,7 +185,6 @@ function HomeView({ user, subscription, history, plans, attendedDays, expirySoon
     <section className="view-stack">
       <div className="welcome-row">
         <div>
-          <p className="eyebrow">Member home</p>
           <h1>Hey, {user.full_name.split(" ")[0]}.</h1>
         </div>
         {/* The avatar doubles as the way into profile management. */}
