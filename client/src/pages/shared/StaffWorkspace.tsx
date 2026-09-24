@@ -137,11 +137,6 @@ export default function StaffWorkspace({
 
 			<div className="app-body">
 				<main className="staff-main">
-					<div className="page-title">
-						<p className="eyebrow"></p>
-						
-					</div>
-
 					{tab === "plans" && isAdmin && <PlanManager />}
 					{tab === "coupons" && isAdmin && <CouponManager />}
 					{/* The member profile is admin-only: it carries address, date of
@@ -160,8 +155,19 @@ export default function StaffWorkspace({
 					{tab === "settings" && isAdmin && <SettingsView />}
 				</main>
 
-				{/* One nav, two shapes: a sidebar from 900px up, a bottom bar below. */}
+				{/* One nav, two shapes: a sidebar from 900px up, a bottom bar below.
+				    From 900px it also carries the brand and the account controls,
+				    which lets the header bar go entirely on desktop. */}
 				<nav className="app-nav" aria-label="Workspace navigation">
+					<button
+						className="brand brand-button nav-brand"
+						onClick={() => setTab(homeTab)}
+						aria-label="Go to home"
+					>
+						<span className="brand-mark"><Dumbbell size={19} /></span>
+						<span className="brand-text">FITCORE</span>
+					</button>
+
 					{tabs.map(([key, Icon, label]) => (
 						<button
 							key={key}
@@ -177,6 +183,18 @@ export default function StaffWorkspace({
 							<span>{label}</span>
 						</button>
 					))}
+
+					{/* Account controls, at the foot of the rail. Hidden below
+					    900px, where the header bar still holds them. */}
+					<div className="nav-footer">
+						<span className="role-chip">{roleLabels[user.role]}</span>
+						<div className="nav-footer-actions">
+							<button className="icon-button" onClick={() => setDarkMode(!darkMode)} aria-label="Toggle theme">
+								{darkMode ? <Sun size={18} /> : <Moon size={18} />}
+							</button>
+							<button className="icon-button" onClick={onLogout} aria-label="Sign out"><LogOut size={18} /></button>
+						</div>
+					</div>
 				</nav>
 			</div>
 		</div>
